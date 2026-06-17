@@ -1,4 +1,4 @@
-import { FileView, TFile, WorkspaceLeaf } from "obsidian";
+import { FileView, TFile, WorkspaceLeaf, Notice } from "obsidian";
 import { VIEW_TYPE_PDF_ANNOTATOR } from "./types";
 import type { Annotation } from "./types";
 import { PdfRenderer, type RenderedPage } from "./PdfRenderer";
@@ -14,6 +14,8 @@ export class PdfAnnotatorView extends FileView {
 	private annotationLayer: AnnotationLayer;
 	private scrollContainer: HTMLDivElement | null = null;
 	private plugin: PdfAnnotatorPlugin;
+	private zoomAbortController: AbortController | null = null;
+	private isZooming = false;
 
 	constructor(leaf: WorkspaceLeaf, plugin: PdfAnnotatorPlugin) {
 		super(leaf);
@@ -51,11 +53,88 @@ export class PdfAnnotatorView extends FileView {
 		container.addClass("pdf-annotator-container");
 
 		this.scrollContainer = container.createDiv({ cls: "pdf-annotator-scroll" });
+		this.setupZoomHandlers();
 	}
 
 	async onClose(): Promise<void> {
+		this.zoomAbortController?.abort();
 		this.highlightManager.destroy();
 		this.renderer.destroy();
+	}
+
+	private setupZoomHandlers(): void {
+		if (!this.scrollContainer) return;
+		this.zoomAbortController = new AbortController();
+		const signal = this.zoomAbortController.signal;
+
+		// Ctrl/Cmd + scroll → zoom
+		this.scrollContainer.addEventListener("wheel", (e) => {
+			if (e.ctrlKey || e.metaKey) {
+				e.preventDefault();
+				if (e.deltaY < 0) {
+					this.zoom("in");
+				} else if (e.deltaY > 0) {
+					this.zoom("out");
+				}
+			}
+		}, { signal, passive: false });
+
+		// Ctrl/Cmd + +/- → zoom
+		this.containerEl.addEventListener("keydown", (e) => {
+			if (e.ctrlKey || e.metaKey) {
+				if (e.key === "=" || e.key === "+") {
+					e.preventDefault();
+					this.zoom("in");
+				} else if (e.key === "-") {
+					e.preventDefault();
+					this.zoom("out");
+				} else if (e.key === "0") {
+					e.preventDefault();
+					this.zoom("reset");
+				}
+			}
+		}, { signal });
+	}
+
+	private async zoom(direction: "in" | "out" | "reset"): Promise<void> {
+		if (this.isZooming) return;
+		this.isZooming = true;
+
+		try {
+			const scrollEl = this.scrollContainer!;
+			// Remember scroll position as a ratio
+			const scrollRatio = scrollEl.scrollHeight > 0
+				? scrollEl.scrollTop / scrollEl.scrollHeight
+				: 0;
+
+			if (direction === "reset") {
+				this.renderer.setScale(1.5);
+			} else if (direction === "in") {
+				this.renderer.zoomIn();
+			} else {
+				this.renderer.zoomOut();
+			}
+
+			const scale = this.renderer.getScale();
+			new Notice(`Zoom: ${Math.round(scale * 100 / 1.5)}%`);
+
+			// Re-render all pages at new scale (vector re-render)
+			await this.renderer.reRenderAllPages();
+
+			// Re-render all annotations at new positions
+			this.annotationLayer.clear();
+			for (const rendered of this.renderer.getAllRenderedPages()) {
+				const pageAnnotations = this.store.getAnnotationsForPage(rendered.pageNumber);
+				for (const annotation of pageAnnotations) {
+					this.annotationLayer.renderHighlight(rendered, annotation);
+				}
+			}
+
+			// Restore scroll position
+			scrollEl.scrollTop = scrollRatio * scrollEl.scrollHeight;
+		} finally {
+			this.isZooming = false;
+		}
 	}
 
 	async onLoadFile(file: TFile): Promise<void> {

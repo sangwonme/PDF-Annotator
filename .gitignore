@@ -3,10 +3,15 @@ main.js
 
 # npm
 node_modules/
+package-lock.json
 
 # Obsidian
 .obsidian/
 data.json
+
+# Test / debug files
+*.pdf
+*.annotations.json
 
 # IDE
 .vscode/
