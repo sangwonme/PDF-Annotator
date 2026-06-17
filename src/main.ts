@@ -1,4 +1,4 @@
-import { Plugin, TFile, Menu } from "obsidian";
+import { Plugin, TFile, TAbstractFile, Menu } from "obsidian";
 import { VIEW_TYPE_PDF_ANNOTATOR } from "./types";
 import { PdfAnnotatorView } from "./PdfAnnotatorView";
 
@@ -18,6 +18,24 @@ export default class PdfAnnotatorPlugin extends Plugin {
 							.setIcon("highlighter")
 							.onClick(() => this.openPdfAnnotator(file));
 					});
+				}
+			})
+		);
+
+		// Move annotation file when PDF is renamed/moved
+		this.registerEvent(
+			this.app.vault.on("rename", (file: TAbstractFile, oldPath: string) => {
+				if (file instanceof TFile && file.extension === "pdf") {
+					this.moveAnnotationFile(oldPath, file.path);
+				}
+			})
+		);
+
+		// Delete annotation file when PDF is deleted
+		this.registerEvent(
+			this.app.vault.on("delete", (file: TAbstractFile) => {
+				if (file instanceof TFile && file.extension === "pdf") {
+					this.deleteAnnotationFile(file.path);
 				}
 			})
 		);
@@ -43,6 +61,23 @@ export default class PdfAnnotatorPlugin extends Plugin {
 			type: VIEW_TYPE_PDF_ANNOTATOR,
 			state: { file: file.path },
 		});
+	}
+
+	private async moveAnnotationFile(oldPdfPath: string, newPdfPath: string): Promise<void> {
+		const oldAnnotationPath = oldPdfPath + ".annotations.json";
+		const newAnnotationPath = newPdfPath + ".annotations.json";
+		const annotationFile = this.app.vault.getAbstractFileByPath(oldAnnotationPath);
+		if (annotationFile instanceof TFile) {
+			await this.app.fileManager.renameFile(annotationFile, newAnnotationPath);
+		}
+	}
+
+	private async deleteAnnotationFile(pdfPath: string): Promise<void> {
+		const annotationPath = pdfPath + ".annotations.json";
+		const annotationFile = this.app.vault.getAbstractFileByPath(annotationPath);
+		if (annotationFile instanceof TFile) {
+			await this.app.vault.delete(annotationFile);
+		}
 	}
 
 	async onunload(): Promise<void> {
