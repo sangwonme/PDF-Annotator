@@ -1,0 +1,159 @@
+{
+	"version": 1,
+	"annotations": [
+		{
+			"id": "mqi8soahxeju0g",
+			"type": "highlight",
+			"color": "#FFEB3B",
+			"created": "2026-06-17T15:45:16.793Z",
+			"modified": "2026-06-17T15:45:16.793Z",
+			"pageNumber": 2,
+			"selectors": [
+				{
+					"type": "TextQuoteSelector",
+					"exact": "ren need developmentally appropriate\neducation and practice to develop such emotional competencies.\nChildren’s relationships with their parents or siblings significa",
+					"prefix": "thers [72 , 87 ]. Hence, child",
+					"suffix": "ntlyimpact their emotional dev"
+				},
+				{
+					"type": "TextPositionSelector",
+					"start": 520,
+					"end": 683
+				},
+				{
+					"type": "PageSelector",
+					"pageNumber": 2,
+					"rects": [
+						{
+							"x1": 0.2534589912896582,
+							"y1": 0.20622895622895623,
+							"x2": 0.4842893646173747,
+							"y2": 0.22306397306397308
+						},
+						{
+							"x1": 0.08789488017429194,
+							"y1": 0.22002577861952863,
+							"x2": 0.4881493395969499,
+							"y2": 0.23686079545454544
+						},
+						{
+							"x1": 0.08789488017429194,
+							"y1": 0.23382260101010102,
+							"x2": 0.4640364636523012,
+							"y2": 0.25065761784511786
+						}
+					]
+				}
+			],
+			"comment": ""
+		},
+		{
+			"id": "mqi8t799jdk5ng",
+			"type": "highlight",
+			"color": "#FFEB3B",
+			"created": "2026-06-17T15:45:41.373Z",
+			"modified": "2026-06-17T15:45:41.373Z",
+			"pageNumber": 2,
+			"selectors": [
+				{
+					"type": "TextQuoteSelector",
+					"exact": " alleviate",
+					"prefix": "explores possible solutions to",
+					"suffix": " adverse emotionalexperiences,"
+				},
+				{
+					"type": "TextPositionSelector",
+					"start": 3746,
+					"end": 3756
+				},
+				{
+					"type": "PageSelector",
+					"pageNumber": 2,
+					"rects": [
+						{
+							"x1": 0.753547485617511,
+							"y1": 0.13352272727272727,
+							"x2": 0.8058435776654411,
+							"y2": 0.1503577441077441
+						}
+					]
+				}
+			],
+			"comment": ""
+		},
+		{
+			"id": "mqi8vcopn23d9y",
+			"type": "highlight",
+			"color": "#FFEB3B",
+			"created": "2026-06-17T15:47:21.721Z",
+			"modified": "2026-06-17T16:02:18.587Z",
+			"pageNumber": 1,
+			"selectors": [
+				{
+					"type": "TextQuoteSelector",
+					"exact": " However, it is challenging for parents or siblings to have\neffective emotion commun",
+					"prefix": "s, particularly familymembers.",
+					"suffix": "ication with children since ch"
+				},
+				{
+					"type": "TextPositionSelector",
+					"start": 769,
+					"end": 852
+				},
+				{
+					"type": "PageSelector",
+					"pageNumber": 1,
+					"rects": [
+						{
+							"x1": 0.14808239240791804,
+							"y1": 0.6534222432659933,
+							"x2": 0.48877352047589867,
+							"y2": 0.67025726010101
+						},
+						{
+							"x1": 0.08789488017429194,
+							"y1": 0.667232218013468,
+							"x2": 0.25070675785505175,
+							"y2": 0.6840672348484849
+						}
+					]
+				}
+			],
+			"comment": ""
+		},
+		{
+			"id": "mqi9t46ofvf7qv",
+			"type": "highlight",
+			"color": "#FFEB3B",
+			"created": "2026-06-17T16:13:37.008Z",
+			"modified": "2026-06-17T16:13:47.784Z",
+			"pageNumber": 1,
+			"selectors": [
+				{
+					"type": "TextQuoteSelector",
+					"exact": "versations. Thr",
+					"prefix": "hile carrying on free-form con",
+					"suffix": "ough an exploratory∗Woosuk Seo"
+				},
+				{
+					"type": "TextPositionSelector",
+					"start": 1174,
+					"end": 1189
+				},
+				{
+					"type": "PageSelector",
+					"pageNumber": 1,
+					"rects": [
+						{
+							"x1": 0.27627756289147604,
+							"y1": 0.7364267676767676,
+							"x2": 0.3649833197167756,
+							"y2": 0.7532617845117845
+						}
+					]
+				}
+			],
+			"comment": "hi\nhui"
+		}
+	]
+}

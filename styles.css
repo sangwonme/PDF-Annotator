@@ -1,0 +1,311 @@
+/* PDF Annotator Plugin Styles */
+
+.pdf-annotator-container {
+	height: 100%;
+	overflow: hidden;
+}
+
+.pdf-annotator-scroll {
+	height: 100%;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	padding: 20px 0;
+	gap: 10px;
+	background-color: var(--background-secondary);
+}
+
+.pdf-annotator-loading {
+	padding: 40px;
+	color: var(--text-muted);
+	font-size: 14px;
+}
+
+/* Page wrapper: page + comment margin */
+.pdf-annotator-page-wrapper {
+	display: flex;
+	flex-direction: row;
+	align-items: flex-start;
+	gap: 12px;
+}
+
+/* Page container */
+.pdf-annotator-page {
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+	background: white;
+	position: relative;
+	flex-shrink: 0;
+	isolation: isolate;
+}
+
+.pdf-annotator-page canvas {
+	display: block;
+}
+
+/* Comment margin */
+.pdf-annotator-comment-margin {
+	width: 260px;
+	flex-shrink: 0;
+	position: relative;
+}
+
+/* Text layer - from pdfjs-dist official CSS */
+.pdf-annotator-page .textLayer {
+	position: absolute;
+	text-align: initial;
+	inset: 0;
+	overflow: hidden;
+	opacity: 1;
+	line-height: 1;
+	-webkit-text-size-adjust: none;
+	-moz-text-size-adjust: none;
+	text-size-adjust: none;
+	forced-color-adjust: none;
+	transform-origin: 0 0;
+	caret-color: CanvasText;
+	-webkit-user-select: text !important;
+	-moz-user-select: text !important;
+	user-select: text !important;
+	pointer-events: auto !important;
+}
+
+.pdf-annotator-page .textLayer :is(span, br) {
+	color: transparent;
+	position: absolute;
+	white-space: pre;
+	cursor: text;
+	transform-origin: 0% 0%;
+	-webkit-user-select: text !important;
+	-moz-user-select: text !important;
+	user-select: text !important;
+}
+
+.pdf-annotator-page .textLayer > :not(.markedContent),
+.pdf-annotator-page .textLayer .markedContent span:not(.markedContent) {
+}
+
+.pdf-annotator-container,
+.pdf-annotator-scroll,
+.pdf-annotator-page,
+.pdf-annotator-page-wrapper {
+	-webkit-user-select: text !important;
+	-moz-user-select: text !important;
+	user-select: text !important;
+}
+
+.pdf-annotator-page .textLayer span.markedContent {
+	top: 0;
+	height: 0;
+}
+
+.pdf-annotator-page .textLayer ::selection {
+	background: rgba(0, 100, 255, 0.3);
+}
+
+/* Annotation layer - no z-index so mix-blend-mode blends with canvas beneath */
+.pdf-annotator-annotation-layer {
+	position: absolute;
+	left: 0;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	pointer-events: none;
+}
+
+/* Highlight elements */
+.pdf-annotator-highlight {
+	position: absolute;
+	mix-blend-mode: multiply;
+	border-radius: 2px;
+	pointer-events: auto;
+	transition: filter 0.15s ease;
+}
+
+.pdf-annotator-highlight.active {
+	filter: brightness(0.85);
+}
+
+/* Comment card in margin */
+.pdf-annotator-comment-card {
+	position: absolute;
+	left: 0;
+	right: 0;
+	display: flex;
+	flex-direction: row;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	overflow: hidden;
+	cursor: default;
+	transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.pdf-annotator-comment-card.active {
+	border-color: var(--interactive-accent);
+	box-shadow: 0 0 0 1px var(--interactive-accent);
+}
+
+.pdf-annotator-comment-color-bar {
+	width: 4px;
+	flex-shrink: 0;
+}
+
+.pdf-annotator-comment-body {
+	flex: 1;
+	min-width: 0;
+	position: relative;
+	padding: 8px 10px;
+}
+
+.pdf-annotator-comment-text {
+	font-size: 13px;
+	line-height: 1.4;
+	color: var(--text-normal);
+	white-space: pre-wrap;
+	word-break: break-word;
+	padding-right: 22px;
+}
+
+/* Action buttons row */
+.pdf-annotator-comment-actions {
+	position: absolute;
+	top: 4px;
+	right: 4px;
+	display: flex;
+	gap: 2px;
+	opacity: 0;
+	transition: opacity 0.15s ease;
+}
+
+.pdf-annotator-comment-card:hover .pdf-annotator-comment-actions {
+	opacity: 1;
+}
+
+.pdf-annotator-comment-action-btn {
+	width: 22px;
+	height: 22px;
+	padding: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: none;
+	border: none;
+	border-radius: 4px;
+	color: var(--text-muted);
+	cursor: pointer;
+	transition: color 0.15s ease, background 0.15s ease;
+}
+
+.pdf-annotator-comment-action-btn:hover {
+	color: var(--text-normal);
+	background: var(--background-modifier-hover);
+}
+
+.pdf-annotator-comment-action-btn--danger:hover {
+	color: var(--text-error);
+}
+
+/* Save button (disk) */
+.pdf-annotator-comment-save-btn {
+	width: 22px;
+	height: 22px;
+	padding: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	position: absolute;
+	top: 6px;
+	right: 4px;
+	background: none;
+	border: none;
+	border-radius: 4px;
+	color: var(--interactive-accent);
+	cursor: pointer;
+	transition: color 0.15s ease;
+}
+
+.pdf-annotator-comment-save-btn:hover {
+	color: var(--interactive-accent-hover);
+	background: var(--background-modifier-hover);
+}
+
+/* Inline textarea for editing */
+.pdf-annotator-comment-textarea {
+	width: 100%;
+	min-height: 60px;
+	padding: 0;
+	margin: 0;
+	border: none;
+	outline: none;
+	resize: vertical;
+	background: transparent;
+	color: var(--text-normal);
+	font-family: inherit;
+	font-size: 13px;
+	line-height: 1.4;
+}
+
+.pdf-annotator-comment-card.editing {
+	border-color: var(--interactive-accent);
+}
+
+/* Color picker popup */
+.pdf-annotator-color-picker {
+	position: fixed;
+	z-index: 1000;
+	display: flex;
+	gap: 4px;
+	padding: 6px;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.pdf-annotator-color-btn {
+	width: 24px;
+	height: 24px;
+	border-radius: 50%;
+	border: 2px solid transparent;
+	cursor: pointer;
+	padding: 0;
+	transition: transform 0.1s ease, border-color 0.1s ease;
+}
+
+.pdf-annotator-color-btn:hover {
+	transform: scale(1.2);
+	border-color: var(--text-normal);
+}
+
+/* Note modal */
+.pdf-annotator-note-modal h3 {
+	margin-top: 0;
+	margin-bottom: 12px;
+}
+
+.pdf-annotator-note-textarea {
+	width: 100%;
+	min-height: 120px;
+	resize: vertical;
+	padding: 8px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 4px;
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-family: inherit;
+	font-size: 14px;
+	line-height: 1.5;
+}
+
+.pdf-annotator-note-textarea:focus {
+	outline: none;
+	border-color: var(--interactive-accent);
+}
+
+.pdf-annotator-note-buttons {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	margin-top: 12px;
+}
