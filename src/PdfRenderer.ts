@@ -7,19 +7,23 @@ import pdfjsWorkerSrc from "pdfjs-dist/build/pdf.worker.min.mjs";
 const workerBlob = new Blob([pdfjsWorkerSrc], { type: "application/javascript" });
 pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(workerBlob);
 
-export interface RenderedPage {
+export interface PageInfo {
 	pageNumber: number;
 	wrapper: HTMLDivElement;
 	container: HTMLDivElement;
-	canvas: HTMLCanvasElement;
-	textLayerDiv: HTMLDivElement;
 	annotationLayerDiv: HTMLDivElement;
 	commentMargin: HTMLDivElement;
 	viewport: pdfjsLib.PageViewport;
 }
 
+export interface RenderedPage extends PageInfo {
+	canvas: HTMLCanvasElement;
+	textLayerDiv: HTMLDivElement;
+}
+
 export class PdfRenderer {
 	private pdfDoc: PDFDocumentProxy | null = null;
+	private pages: Map<number, PageInfo> = new Map();
 	private renderedPages: Map<number, RenderedPage> = new Map();
 	private scale = 1.5;
 	private readonly MIN_SCALE = 0.5;
@@ -32,7 +36,12 @@ export class PdfRenderer {
 		return this.pdfDoc.numPages;
 	}
 
-	async renderPage(pageNumber: number): Promise<RenderedPage> {
+	/**
+	 * Create a correctly-sized placeholder (wrapper + container + comment margin)
+	 * without rendering any canvas or text layer. This is cheap and establishes
+	 * the full scroll height for all pages.
+	 */
+	async createPlaceholder(pageNumber: number): Promise<PageInfo> {
 		if (!this.pdfDoc) throw new Error("No document loaded");
 
 		const page: PDFPageProxy = await this.pdfDoc.getPage(pageNumber);
@@ -41,6 +50,7 @@ export class PdfRenderer {
 		// Wrapper (page + comment margin)
 		const wrapper = document.createElement("div");
 		wrapper.className = "pdf-annotator-page-wrapper";
+		wrapper.dataset.pageNumber = String(pageNumber);
 
 		// Page container
 		const container = document.createElement("div");
@@ -57,47 +67,87 @@ export class PdfRenderer {
 		commentMargin.style.minHeight = `${viewport.height}px`;
 		wrapper.appendChild(commentMargin);
 
-		// Canvas layer
-		const canvas = document.createElement("canvas");
-		canvas.width = viewport.width;
-		canvas.height = viewport.height;
-		container.appendChild(canvas);
-
-		const ctx = canvas.getContext("2d")!;
-		await page.render({ canvasContext: ctx, viewport }).promise;
-
-		// Annotation layer (between canvas and text layer)
+		// Annotation layer (will sit between canvas and text layer once rendered)
 		const annotationLayerDiv = document.createElement("div");
 		annotationLayerDiv.className = "pdf-annotator-annotation-layer";
 		container.appendChild(annotationLayerDiv);
 
-		// Text layer
+		const info: PageInfo = {
+			pageNumber, wrapper, container, annotationLayerDiv, commentMargin, viewport,
+		};
+		this.pages.set(pageNumber, info);
+		return info;
+	}
+
+	/**
+	 * Render the actual canvas + text layer for a page that already has a
+	 * placeholder. No-op if the page is already rendered.
+	 */
+	async renderPageContent(pageNumber: number): Promise<RenderedPage> {
+		if (!this.pdfDoc) throw new Error("No document loaded");
+
+		const existing = this.renderedPages.get(pageNumber);
+		if (existing) return existing;
+
+		const info = this.pages.get(pageNumber);
+		if (!info) throw new Error(`No placeholder for page ${pageNumber}`);
+
+		const page: PDFPageProxy = await this.pdfDoc.getPage(pageNumber);
+		const viewport = page.getViewport({ scale: this.scale });
+
+		// Canvas layer — insert before annotation layer
+		const canvas = document.createElement("canvas");
+		canvas.width = viewport.width;
+		canvas.height = viewport.height;
+		info.container.insertBefore(canvas, info.annotationLayerDiv);
+
+		const ctx = canvas.getContext("2d")!;
+		await page.render({ canvasContext: ctx, viewport }).promise;
+
+		// Text layer — append after annotation layer (topmost for selection)
 		const textLayerDiv = document.createElement("div");
 		textLayerDiv.className = "textLayer";
 		textLayerDiv.style.setProperty("--scale-factor", String(this.scale));
-		container.appendChild(textLayerDiv);
+		info.container.appendChild(textLayerDiv);
 
 		const textContent = await page.getTextContent();
 		const textLayer = new TextLayer({
 			textContentSource: textContent,
 			container: textLayerDiv,
-			viewport: viewport,
+			viewport,
 		});
 		await textLayer.render();
 
-		const rendered: RenderedPage = {
-			pageNumber,
-			wrapper,
-			container,
-			canvas,
-			textLayerDiv,
-			annotationLayerDiv,
-			commentMargin,
-			viewport,
-		};
+		info.viewport = viewport;
 
+		const rendered: RenderedPage = {
+			...info, canvas, textLayerDiv, viewport,
+		};
 		this.renderedPages.set(pageNumber, rendered);
 		return rendered;
+	}
+
+	/**
+	 * Free the canvas and text layer for a page, keeping the placeholder
+	 * structure intact so scroll position is preserved.
+	 */
+	unrenderPageContent(pageNumber: number): void {
+		const rendered = this.renderedPages.get(pageNumber);
+		if (!rendered) return;
+
+		// Free canvas backing-store memory
+		rendered.canvas.width = 0;
+		rendered.canvas.height = 0;
+		rendered.canvas.remove();
+
+		// Remove text layer
+		rendered.textLayerDiv.remove();
+
+		this.renderedPages.delete(pageNumber);
+	}
+
+	isPageRendered(pageNumber: number): boolean {
+		return this.renderedPages.has(pageNumber);
 	}
 
 	/**
@@ -136,11 +186,30 @@ export class PdfRenderer {
 
 		// Update viewport reference
 		rendered.viewport = viewport;
+
+		// Sync viewport to base page info
+		const info = this.pages.get(rendered.pageNumber);
+		if (info) info.viewport = viewport;
 	}
 
+	/** Re-render only currently-rendered (visible) pages at the new scale. */
 	async reRenderAllPages(): Promise<void> {
 		for (const rendered of this.renderedPages.values()) {
 			await this.reRenderPage(rendered);
+		}
+	}
+
+	/** Update placeholder dimensions for non-rendered pages after a scale change. */
+	async updateAllPlaceholders(): Promise<void> {
+		if (!this.pdfDoc) return;
+		for (const [pageNumber, info] of this.pages) {
+			if (this.renderedPages.has(pageNumber)) continue;
+			const page = await this.pdfDoc.getPage(pageNumber);
+			const viewport = page.getViewport({ scale: this.scale });
+			info.container.style.width = `${viewport.width}px`;
+			info.container.style.height = `${viewport.height}px`;
+			info.commentMargin.style.minHeight = `${viewport.height}px`;
+			info.viewport = viewport;
 		}
 	}
 
@@ -163,8 +232,16 @@ export class PdfRenderer {
 		return this.renderedPages.get(pageNumber);
 	}
 
+	getPageInfo(pageNumber: number): PageInfo | undefined {
+		return this.pages.get(pageNumber);
+	}
+
 	getAllRenderedPages(): RenderedPage[] {
 		return Array.from(this.renderedPages.values());
+	}
+
+	getAllPageInfos(): PageInfo[] {
+		return Array.from(this.pages.values());
 	}
 
 	getScale(): number {
@@ -175,5 +252,6 @@ export class PdfRenderer {
 		this.pdfDoc?.destroy();
 		this.pdfDoc = null;
 		this.renderedPages.clear();
+		this.pages.clear();
 	}
 }

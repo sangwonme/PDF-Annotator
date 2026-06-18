@@ -1,4 +1,4 @@
-import type { RenderedPage } from "./PdfRenderer";
+import type { PageInfo } from "./PdfRenderer";
 import type { Annotation, PageSelector } from "./types";
 
 export type CommentSaveCallback = (annotationId: string, newComment: string) => void;
@@ -28,13 +28,13 @@ export class AnnotationLayer {
 		this.onCommentClear = cb;
 	}
 
-	renderHighlight(renderedPage: RenderedPage, annotation: Annotation): void {
+	renderHighlight(page: PageInfo, annotation: Annotation): void {
 		const pageSelector = annotation.selectors.find(
 			(s): s is PageSelector => s.type === "PageSelector"
 		);
 		if (!pageSelector) return;
 
-		const { viewport, annotationLayerDiv, commentMargin } = renderedPage;
+		const { viewport, annotationLayerDiv, commentMargin } = page;
 		const elements: HTMLElement[] = [];
 
 		for (const rect of pageSelector.rects) {

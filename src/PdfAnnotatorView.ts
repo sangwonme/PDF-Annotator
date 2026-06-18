@@ -1,7 +1,7 @@
 import { FileView, TFile, WorkspaceLeaf, Notice } from "obsidian";
 import { VIEW_TYPE_PDF_ANNOTATOR } from "./types";
 import type { Annotation } from "./types";
-import { PdfRenderer, type RenderedPage } from "./PdfRenderer";
+import { PdfRenderer, type PageInfo } from "./PdfRenderer";
 import { AnnotationStore } from "./AnnotationStore";
 import { HighlightManager } from "./HighlightManager";
 import { AnnotationLayer } from "./AnnotationLayer";
@@ -16,6 +16,8 @@ export class PdfAnnotatorView extends FileView {
 	private plugin: PdfAnnotatorPlugin;
 	private zoomAbortController: AbortController | null = null;
 	private isZooming = false;
+	private intersectionObserver: IntersectionObserver | null = null;
+	private renderingPages: Set<number> = new Set();
 
 	constructor(leaf: WorkspaceLeaf, plugin: PdfAnnotatorPlugin) {
 		super(leaf);
@@ -57,6 +59,8 @@ export class PdfAnnotatorView extends FileView {
 	}
 
 	async onClose(): Promise<void> {
+		this.intersectionObserver?.disconnect();
+		this.intersectionObserver = null;
 		this.zoomAbortController?.abort();
 		this.highlightManager.destroy();
 		this.renderer.destroy();
@@ -118,15 +122,16 @@ export class PdfAnnotatorView extends FileView {
 			const scale = this.renderer.getScale();
 			new Notice(`Zoom: ${Math.round(scale * 100 / 1.5)}%`);
 
-			// Re-render all pages at new scale (vector re-render)
+			// Update sizes for all pages: re-render visible, resize placeholders
+			await this.renderer.updateAllPlaceholders();
 			await this.renderer.reRenderAllPages();
 
-			// Re-render all annotations at new positions
+			// Re-render all annotations at new viewport positions
 			this.annotationLayer.clear();
-			for (const rendered of this.renderer.getAllRenderedPages()) {
-				const pageAnnotations = this.store.getAnnotationsForPage(rendered.pageNumber);
+			for (const pageInfo of this.renderer.getAllPageInfos()) {
+				const pageAnnotations = this.store.getAnnotationsForPage(pageInfo.pageNumber);
 				for (const annotation of pageAnnotations) {
-					this.annotationLayer.renderHighlight(rendered, annotation);
+					this.annotationLayer.renderHighlight(pageInfo, annotation);
 				}
 			}
 
@@ -158,17 +163,22 @@ export class PdfAnnotatorView extends FileView {
 			// Remove loading
 			loading.remove();
 
-			// Render all pages
+			// Create lightweight placeholders for all pages (correct scroll height,
+			// no canvas/text layer — prevents renderer crash on large documents)
 			for (let i = 1; i <= numPages; i++) {
-				const rendered = await this.renderer.renderPage(i);
-				this.scrollContainer.appendChild(rendered.wrapper);
+				const pageInfo = await this.renderer.createPlaceholder(i);
+				this.scrollContainer.appendChild(pageInfo.wrapper);
 
-				// Render existing annotations for this page
+				// Render existing annotations on placeholder (positioned correctly
+				// even without canvas; mix-blend-mode on white bg looks fine)
 				const pageAnnotations = this.store.getAnnotationsForPage(i);
 				for (const annotation of pageAnnotations) {
-					this.annotationLayer.renderHighlight(rendered, annotation);
+					this.annotationLayer.renderHighlight(pageInfo, annotation);
 				}
 			}
+
+			// Lazy-render pages as they scroll into/near the viewport
+			this.setupIntersectionObserver();
 
 			// Set up highlight manager for text selection
 			this.highlightManager.setup(this.scrollContainer, file);
@@ -177,7 +187,62 @@ export class PdfAnnotatorView extends FileView {
 		}
 	}
 
+	/**
+	 * Observe page wrappers: render canvas when near viewport,
+	 * free canvas memory when far away.
+	 */
+	private setupIntersectionObserver(): void {
+		if (!this.scrollContainer) return;
+
+		this.intersectionObserver?.disconnect();
+
+		this.intersectionObserver = new IntersectionObserver(
+			(entries) => {
+				for (const entry of entries) {
+					const pageNumber = parseInt(
+						(entry.target as HTMLElement).dataset.pageNumber ?? "0"
+					);
+					if (!pageNumber) continue;
+
+					if (entry.isIntersecting) {
+						this.lazyRenderPage(pageNumber);
+					} else {
+						this.lazyUnrenderPage(pageNumber);
+					}
+				}
+			},
+			{
+				root: this.scrollContainer,
+				rootMargin: "100% 0px", // pre-render ±1 viewport height
+			}
+		);
+
+		for (const pageInfo of this.renderer.getAllPageInfos()) {
+			this.intersectionObserver.observe(pageInfo.wrapper);
+		}
+	}
+
+	private async lazyRenderPage(pageNumber: number): Promise<void> {
+		if (this.renderingPages.has(pageNumber)) return;
+		if (this.renderer.isPageRendered(pageNumber)) return;
+
+		this.renderingPages.add(pageNumber);
+		try {
+			await this.renderer.renderPageContent(pageNumber);
+		} catch (e) {
+			console.error(`PDF Annotator: failed to render page ${pageNumber}:`, e);
+		} finally {
+			this.renderingPages.delete(pageNumber);
+		}
+	}
+
+	private lazyUnrenderPage(pageNumber: number): void {
+		this.renderer.unrenderPageContent(pageNumber);
+	}
+
 	async onUnloadFile(file: TFile): Promise<void> {
+		this.intersectionObserver?.disconnect();
+		this.intersectionObserver = null;
 		this.highlightManager.destroy();
 		this.renderer.destroy();
 		if (this.scrollContainer) {
