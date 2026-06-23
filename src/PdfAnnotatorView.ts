@@ -311,4 +311,32 @@ export class PdfAnnotatorView extends FileView {
 		}
 		await super.onUnloadFile(file);
 	}
+
+	/**
+	 * Undo the last annotation action
+	 */
+	undo(): void {
+		this.highlightManager.undo();
+	}
+
+	/**
+	 * Redo the last undone action
+	 */
+	redo(): void {
+		this.highlightManager.redo();
+	}
+
+	/**
+	 * Check if undo is available
+	 */
+	canUndo(): boolean {
+		return this.highlightManager.canUndo();
+	}
+
+	/**
+	 * Check if redo is available
+	 */
+	canRedo(): boolean {
+		return this.highlightManager.canRedo();
+	}
 }

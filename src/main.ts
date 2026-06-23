@@ -53,6 +53,36 @@ export default class PdfAnnotatorPlugin extends Plugin {
 				return false;
 			},
 		});
+
+		// Command: undo annotation
+		this.addCommand({
+			id: "pdf-annotator-undo",
+			name: "Undo annotation",
+			checkCallback: (checking) => {
+				const activeView = this.app.workspace.getActiveViewOfType(PdfAnnotatorView);
+				if (activeView && activeView.canUndo()) {
+					if (!checking) activeView.undo();
+					return true;
+				}
+				return false;
+			},
+			hotkeys: [{ modifiers: ["Mod"], key: "z" }],
+		});
+
+		// Command: redo annotation
+		this.addCommand({
+			id: "pdf-annotator-redo",
+			name: "Redo annotation",
+			checkCallback: (checking) => {
+				const activeView = this.app.workspace.getActiveViewOfType(PdfAnnotatorView);
+				if (activeView && activeView.canRedo()) {
+					if (!checking) activeView.redo();
+					return true;
+				}
+				return false;
+			},
+			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "z" }],
+		});
 	}
 
 	async openPdfAnnotator(file: TFile): Promise<void> {
