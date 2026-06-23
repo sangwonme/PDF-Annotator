@@ -126,12 +126,12 @@ export class PdfAnnotatorView extends FileView {
 			await this.renderer.updateAllPlaceholders();
 			await this.renderer.reRenderAllPages();
 
-			// Re-render all annotations at new viewport positions
+			// Re-render annotations only for rendered pages (not placeholders)
 			this.annotationLayer.clear();
-			for (const pageInfo of this.renderer.getAllPageInfos()) {
-				const pageAnnotations = this.store.getAnnotationsForPage(pageInfo.pageNumber);
+			for (const rendered of this.renderer.getAllRenderedPages()) {
+				const pageAnnotations = this.store.getAnnotationsForPage(rendered.pageNumber);
 				for (const annotation of pageAnnotations) {
-					this.annotationLayer.renderHighlight(pageInfo, annotation);
+					this.annotationLayer.renderHighlight(rendered, annotation);
 				}
 			}
 
@@ -213,7 +213,7 @@ export class PdfAnnotatorView extends FileView {
 			},
 			{
 				root: this.scrollContainer,
-				rootMargin: "100% 0px", // pre-render ±1 viewport height
+				rootMargin: "150% 0px", // pre-render ±1.5 viewport heights for smoother fast scrolling
 			}
 		);
 

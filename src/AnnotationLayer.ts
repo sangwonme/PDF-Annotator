@@ -15,6 +15,7 @@ export class AnnotationLayer {
 	private onCommentSave: CommentSaveCallback | null = null;
 	private onAnnotationDelete: AnnotationDeleteCallback | null = null;
 	private onCommentClear: CommentClearCallback | null = null;
+	private overlapRAFs: Map<HTMLElement, number> = new Map();
 
 	setCommentSaveCallback(cb: CommentSaveCallback): void {
 		this.onCommentSave = cb;
@@ -37,6 +38,9 @@ export class AnnotationLayer {
 		const { viewport, annotationLayerDiv, leftCommentMargin, rightCommentMargin } = page;
 		const elements: HTMLElement[] = [];
 
+		// Batch DOM operations with DocumentFragment
+		const fragment = document.createDocumentFragment();
+
 		for (const rect of pageSelector.rects) {
 			const highlightEl = document.createElement("div");
 			highlightEl.className = "pdf-annotator-highlight";
@@ -48,9 +52,12 @@ export class AnnotationLayer {
 			highlightEl.style.height = `${(rect.y2 - rect.y1) * viewport.height}px`;
 			highlightEl.style.backgroundColor = annotation.color;
 
-			annotationLayerDiv.appendChild(highlightEl);
+			fragment.appendChild(highlightEl);
 			elements.push(highlightEl);
 		}
+
+		// Single DOM append operation
+		annotationLayerDiv.appendChild(fragment);
 
 		// Comment card in the margin - choose left or right based on highlight position
 		let commentCard: HTMLElement | null = null;
@@ -75,6 +82,23 @@ export class AnnotationLayer {
 			entry.elements.forEach(el => el.classList.toggle("active", active));
 			entry.commentCard?.classList.toggle("active", active);
 		}
+	}
+
+	/**
+	 * Start editing a comment card (for inline editing on new highlights).
+	 * @param clearText If true, starts with empty textarea (for new highlights)
+	 */
+	startEditingCard(annotationId: string, clearText = false): void {
+		const entry = this.entries.get(annotationId);
+		if (!entry?.commentCard) return;
+
+		const commentMargin = entry.commentCard.parentElement as HTMLElement;
+		if (!commentMargin) return;
+
+		const textEl = entry.commentCard.querySelector(".pdf-annotator-comment-text");
+		const currentText = clearText ? "" : (textEl?.textContent ?? "");
+
+		this.enterEditMode(entry.commentCard, annotationId, currentText, commentMargin);
 	}
 
 	private createCommentCard(
@@ -160,7 +184,7 @@ export class AnnotationLayer {
 		});
 
 		commentMargin.appendChild(card);
-		this.resolveOverlaps(commentMargin);
+		this.scheduleOverlapResolve(commentMargin);
 		return card;
 	}
 
@@ -194,15 +218,35 @@ export class AnnotationLayer {
 		}, 10);
 
 		const save = () => {
-			const newText = textarea.value;
+			const newText = textarea.value.trim();
 			textarea.remove();
 			saveBtn.remove();
 			(textEl as HTMLElement).style.display = "";
 			(actionsEl as HTMLElement).style.display = "";
-			textEl.textContent = newText;
 			card.classList.remove("editing");
-			this.onCommentSave?.(annotationId, newText);
-			this.resolveOverlaps(commentMargin);
+
+			if (newText === "") {
+				// Empty comment - clear it (remove card, keep highlight)
+				this.onCommentClear?.(annotationId);
+			} else {
+				// Save non-empty comment
+				textEl.textContent = newText;
+				this.onCommentSave?.(annotationId, newText);
+				this.scheduleOverlapResolve(commentMargin);
+			}
+		};
+
+		const cancel = () => {
+			textarea.remove();
+			saveBtn.remove();
+			(textEl as HTMLElement).style.display = "";
+			(actionsEl as HTMLElement).style.display = "";
+			card.classList.remove("editing");
+
+			// If original text was empty (new highlight), clear the comment
+			if (currentText === "" || currentText.trim() === "") {
+				this.onCommentClear?.(annotationId);
+			}
 		};
 
 		saveBtn.addEventListener("click", (e) => {
@@ -210,12 +254,27 @@ export class AnnotationLayer {
 			save();
 		});
 
+		// ESC to cancel
 		textarea.addEventListener("keydown", (e) => {
-			if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+			if (e.key === "Escape") {
 				e.preventDefault();
-				save();
+				cancel();
 			}
 		});
+	}
+
+	/**
+	 * Schedule overlap resolution with requestAnimationFrame batching.
+	 * Multiple calls for the same margin within a frame are batched into one.
+	 */
+	private scheduleOverlapResolve(commentMargin: HTMLElement): void {
+		if (this.overlapRAFs.has(commentMargin)) return;
+
+		const rafId = requestAnimationFrame(() => {
+			this.resolveOverlaps(commentMargin);
+			this.overlapRAFs.delete(commentMargin);
+		});
+		this.overlapRAFs.set(commentMargin, rafId);
 	}
 
 	/**
@@ -248,7 +307,7 @@ export class AnnotationLayer {
 			entry.elements.forEach(el => el.remove());
 			entry.commentCard?.remove();
 			this.entries.delete(annotationId);
-			if (margin) this.resolveOverlaps(margin);
+			if (margin) this.scheduleOverlapResolve(margin);
 		}
 	}
 
@@ -312,10 +371,34 @@ export class AnnotationLayer {
 	}
 
 	clear(): void {
+		// Fast bulk removal: clear parent containers instead of individual elements
+		const processedLayers = new Set<HTMLElement>();
+		const processedMargins = new Set<HTMLElement>();
+
 		this.entries.forEach(entry => {
-			entry.elements.forEach(el => el.remove());
-			entry.commentCard?.remove();
+			// Clear annotation layers
+			if (entry.elements.length > 0) {
+				const layer = entry.elements[0].parentElement as HTMLElement;
+				if (layer && !processedLayers.has(layer)) {
+					layer.innerHTML = "";
+					processedLayers.add(layer);
+				}
+			}
+
+			// Clear comment margins
+			if (entry.commentCard) {
+				const margin = entry.commentCard.parentElement as HTMLElement;
+				if (margin && !processedMargins.has(margin)) {
+					margin.innerHTML = "";
+					processedMargins.add(margin);
+				}
+			}
 		});
+
 		this.entries.clear();
+
+		// Cancel any pending overlap resolution
+		this.overlapRAFs.forEach(rafId => cancelAnimationFrame(rafId));
+		this.overlapRAFs.clear();
 	}
 }
