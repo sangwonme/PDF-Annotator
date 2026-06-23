@@ -254,11 +254,14 @@ export class AnnotationLayer {
 			save();
 		});
 
-		// ESC to cancel
+		// ESC to cancel, Ctrl+Enter to save
 		textarea.addEventListener("keydown", (e) => {
 			if (e.key === "Escape") {
 				e.preventDefault();
 				cancel();
+			} else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+				e.preventDefault();
+				save();
 			}
 		});
 	}
