@@ -244,22 +244,28 @@ export class PdfAnnotatorView extends FileView {
 			}
 		);
 
-		// Separate observer for accurate page tracking (no margin, high threshold)
+		// Separate observer for accurate page tracking
+		// Strategy: when ANY page changes visibility, check currentPage ± 2 to find most visible
 		this.pageTrackingObserver = new IntersectionObserver(
 			(entries) => {
-				// Find the page with highest intersection ratio (most visible)
+				// Only recalculate if something actually changed
+				if (entries.length === 0) return;
+
 				let maxRatio = 0;
 				let mostVisiblePage = this.currentPage;
 
-				for (const entry of entries) {
-					if (entry.isIntersecting && entry.intersectionRatio > maxRatio) {
-						const pageNumber = parseInt(
-							(entry.target as HTMLElement).dataset.pageNumber ?? "0"
-						);
-						if (pageNumber) {
-							maxRatio = entry.intersectionRatio;
-							mostVisiblePage = pageNumber;
-						}
+				// Check pages around current page (± 2 range)
+				const startPage = Math.max(1, this.currentPage - 2);
+				const endPage = Math.min(this.totalPages, this.currentPage + 2);
+
+				for (let pageNum = startPage; pageNum <= endPage; pageNum++) {
+					const pageInfo = this.renderer.getPageInfo(pageNum);
+					if (!pageInfo) continue;
+
+					const visibleRatio = this.calculateVisibleRatio(pageInfo.wrapper);
+					if (visibleRatio > maxRatio) {
+						maxRatio = visibleRatio;
+						mostVisiblePage = pageNum;
 					}
 				}
 
@@ -279,6 +285,27 @@ export class PdfAnnotatorView extends FileView {
 			this.intersectionObserver.observe(pageInfo.wrapper);
 			this.pageTrackingObserver.observe(pageInfo.wrapper);
 		}
+	}
+
+	/**
+	 * Calculate what fraction of an element is visible within the scroll container.
+	 * Returns a value between 0 (not visible) and 1 (fully visible).
+	 */
+	private calculateVisibleRatio(element: HTMLElement): number {
+		if (!this.scrollContainer) return 0;
+
+		const elementRect = element.getBoundingClientRect();
+		const containerRect = this.scrollContainer.getBoundingClientRect();
+
+		// Calculate visible bounds
+		const visibleTop = Math.max(elementRect.top, containerRect.top);
+		const visibleBottom = Math.min(elementRect.bottom, containerRect.bottom);
+		const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+
+		const elementHeight = elementRect.height;
+		if (elementHeight === 0) return 0;
+
+		return visibleHeight / elementHeight;
 	}
 
 	private async lazyRenderPage(pageNumber: number): Promise<void> {
