@@ -34,7 +34,7 @@ export class AnnotationLayer {
 		);
 		if (!pageSelector) return;
 
-		const { viewport, annotationLayerDiv, commentMargin } = page;
+		const { viewport, annotationLayerDiv, leftCommentMargin, rightCommentMargin } = page;
 		const elements: HTMLElement[] = [];
 
 		for (const rect of pageSelector.rects) {
@@ -52,9 +52,11 @@ export class AnnotationLayer {
 			elements.push(highlightEl);
 		}
 
-		// Comment card in the margin
+		// Comment card in the margin - choose left or right based on highlight position
 		let commentCard: HTMLElement | null = null;
 		if (annotation.comment) {
+			const firstRect = pageSelector.rects[0];
+			const commentMargin = firstRect.x1 < 0.5 ? leftCommentMargin : rightCommentMargin;
 			commentCard = this.createCommentCard(annotation, pageSelector, viewport, commentMargin);
 		}
 
@@ -274,7 +276,18 @@ export class AnnotationLayer {
 			if (!firstEl) return;
 
 			const wrapper = firstEl.closest(".pdf-annotator-page-wrapper");
-			const commentMargin = wrapper?.querySelector(".pdf-annotator-comment-margin") as HTMLElement;
+			const page = firstEl.closest(".pdf-annotator-page") as HTMLElement;
+			if (!wrapper || !page) return;
+
+			// Determine which margin to use based on highlight position
+			const leftPx = parseFloat(firstEl.style.left);
+			const pageWidth = parseFloat(page.style.width);
+			const normalizedX = leftPx / pageWidth;
+
+			const marginClass = normalizedX < 0.5
+				? ".pdf-annotator-comment-margin-left"
+				: ".pdf-annotator-comment-margin-right";
+			const commentMargin = wrapper.querySelector(marginClass) as HTMLElement;
 			if (!commentMargin) return;
 
 			const topPx = parseFloat(firstEl.style.top);
