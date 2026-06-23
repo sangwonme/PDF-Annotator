@@ -22,7 +22,7 @@
 	font-size: 14px;
 }
 
-/* Page wrapper: page + comment margin */
+/* Page wrapper: left margin + page + right margin */
 .pdf-annotator-page-wrapper {
 	display: flex;
 	flex-direction: row;
@@ -43,11 +43,21 @@
 	display: block;
 }
 
-/* Comment margin */
+/* Comment margins */
 .pdf-annotator-comment-margin {
 	width: 260px;
 	flex-shrink: 0;
 	position: relative;
+}
+
+/* Left margin cards align to the right (closer to PDF) */
+.pdf-annotator-comment-margin-left .pdf-annotator-comment-card {
+	margin-left: auto;
+}
+
+/* Right margin cards align to the left (default, closer to PDF) */
+.pdf-annotator-comment-margin-right .pdf-annotator-comment-card {
+	margin-right: auto;
 }
 
 /* Text layer - from pdfjs-dist official CSS */

@@ -20,6 +20,7 @@ export class HighlightManager {
 	private scrollContainer: HTMLElement | null = null;
 	private file: TFile | null = null;
 	private abortController: AbortController | null = null;
+	private mouseMoveRAF: number | null = null;
 
 	constructor(
 		renderer: PdfRenderer,
@@ -75,18 +76,24 @@ export class HighlightManager {
 				}
 			}
 		}, { signal });
-		// Hover tracking for highlights below text layer
+		// Hover tracking for highlights below text layer - throttled with RAF
 		let lastHoveredId: string | null = null;
 		scrollContainer.addEventListener("mousemove", (e) => {
-			const highlightEl = this.findHighlightAt(e.clientX, e.clientY);
-			const id = highlightEl?.dataset.annotationId ?? null;
-			if (id !== lastHoveredId) {
-				if (lastHoveredId) this.annotationLayer.setActive(lastHoveredId, false);
-				if (id) this.annotationLayer.setActive(id, true);
-				lastHoveredId = id;
-			}
-			// Change cursor based on whether hovering a highlight
-			scrollContainer.style.cursor = id ? "pointer" : "";
+			// Throttle with requestAnimationFrame for smooth performance
+			if (this.mouseMoveRAF !== null) return;
+
+			this.mouseMoveRAF = requestAnimationFrame(() => {
+				const highlightEl = this.findHighlightAt(e.clientX, e.clientY);
+				const id = highlightEl?.dataset.annotationId ?? null;
+				if (id !== lastHoveredId) {
+					if (lastHoveredId) this.annotationLayer.setActive(lastHoveredId, false);
+					if (id) this.annotationLayer.setActive(id, true);
+					lastHoveredId = id;
+				}
+				// Change cursor based on whether hovering a highlight
+				scrollContainer.style.cursor = id ? "pointer" : "";
+				this.mouseMoveRAF = null;
+			});
 		}, { signal });
 
 		scrollContainer.addEventListener("mouseleave", () => {
@@ -146,14 +153,17 @@ export class HighlightManager {
 			modified: now,
 			pageNumber,
 			selectors,
-			comment: "",
+			comment: " ", // Temporary space to trigger card creation
 		};
 
 		this.store.addAnnotation(annotation);
 		this.annotationLayer.renderHighlight(renderedPage, annotation);
-		this.store.saveAnnotations();
 
+		// Clear selection before entering edit mode
 		selection.removeAllRanges();
+
+		// Auto-enter edit mode for inline commenting (clear text for new highlight)
+		this.annotationLayer.startEditingCard(annotation.id, true);
 	}
 
 	private buildSelectors(selection: Selection, range: Range, renderedPage: RenderedPage): AnnotationSelector[] {
@@ -289,6 +299,10 @@ export class HighlightManager {
 	destroy(): void {
 		this.abortController?.abort();
 		this.abortController = null;
+		if (this.mouseMoveRAF !== null) {
+			cancelAnimationFrame(this.mouseMoveRAF);
+			this.mouseMoveRAF = null;
+		}
 		this.colorPicker.hide();
 		this.scrollContainer = null;
 		this.file = null;
