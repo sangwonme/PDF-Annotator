@@ -17,11 +17,11 @@ export class PdfAnnotatorView extends FileView {
 	private zoomAbortController: AbortController | null = null;
 	private isZooming = false;
 	private intersectionObserver: IntersectionObserver | null = null;
+	private pageTrackingObserver: IntersectionObserver | null = null;
 	private renderingPages: Set<number> = new Set();
 	private pageIndicator: HTMLDivElement | null = null;
 	private currentPage = 1;
 	private totalPages = 0;
-	private visiblePages: Set<number> = new Set();
 
 	constructor(leaf: WorkspaceLeaf, plugin: PdfAnnotatorPlugin) {
 		super(leaf);
@@ -58,14 +58,20 @@ export class PdfAnnotatorView extends FileView {
 		container.empty();
 		container.addClass("pdf-annotator-container");
 
+		// Header with page indicator
+		const header = container.createDiv({ cls: "pdf-annotator-header" });
+		this.setupPageIndicator(header);
+
+		// Scroll container for PDF content
 		this.scrollContainer = container.createDiv({ cls: "pdf-annotator-scroll" });
 		this.setupZoomHandlers();
-		this.setupPageIndicator(container);
 	}
 
 	async onClose(): Promise<void> {
 		this.intersectionObserver?.disconnect();
 		this.intersectionObserver = null;
+		this.pageTrackingObserver?.disconnect();
+		this.pageTrackingObserver = null;
 		this.zoomAbortController?.abort();
 		this.highlightManager.destroy();
 		this.renderer.destroy();
@@ -105,45 +111,14 @@ export class PdfAnnotatorView extends FileView {
 		}, { signal });
 	}
 
-	private setupPageIndicator(container: HTMLElement): void {
-		this.pageIndicator = container.createDiv({ cls: "pdf-annotator-page-indicator" });
-
-		// Previous button
-		const prevBtn = this.pageIndicator.createEl("button", {
-			cls: "pdf-annotator-page-nav-btn",
-			attr: { "aria-label": "Previous page" }
-		});
-		prevBtn.innerHTML = "←";
-		prevBtn.addEventListener("click", () => this.goToPage(this.currentPage - 1));
-
-		// Page number display
-		const pageDisplay = this.pageIndicator.createDiv({ cls: "pdf-annotator-page-display" });
-		pageDisplay.setText("0 / 0");
-
-		// Next button
-		const nextBtn = this.pageIndicator.createEl("button", {
-			cls: "pdf-annotator-page-nav-btn",
-			attr: { "aria-label": "Next page" }
-		});
-		nextBtn.innerHTML = "→";
-		nextBtn.addEventListener("click", () => this.goToPage(this.currentPage + 1));
+	private setupPageIndicator(header: HTMLElement): void {
+		this.pageIndicator = header.createDiv({ cls: "pdf-annotator-page-indicator" });
+		this.pageIndicator.setText("0 / 0");
 	}
 
 	private updatePageIndicator(): void {
 		if (!this.pageIndicator) return;
-		const display = this.pageIndicator.querySelector(".pdf-annotator-page-display");
-		if (display) {
-			display.setText(`${this.currentPage} / ${this.totalPages}`);
-		}
-	}
-
-	private goToPage(pageNumber: number): void {
-		if (pageNumber < 1 || pageNumber > this.totalPages) return;
-
-		const pageInfo = this.renderer.getPageInfo(pageNumber);
-		if (pageInfo && this.scrollContainer) {
-			pageInfo.wrapper.scrollIntoView({ behavior: "smooth", block: "start" });
-		}
+		this.pageIndicator.setText(`${this.currentPage} / ${this.totalPages}`);
 	}
 
 	private async zoom(direction: "in" | "out" | "reset"): Promise<void> {
@@ -247,6 +222,7 @@ export class PdfAnnotatorView extends FileView {
 
 		this.intersectionObserver?.disconnect();
 
+		// Observer for lazy rendering (wide margin for pre-rendering)
 		this.intersectionObserver = new IntersectionObserver(
 			(entries) => {
 				for (const entry of entries) {
@@ -257,30 +233,51 @@ export class PdfAnnotatorView extends FileView {
 
 					if (entry.isIntersecting) {
 						this.lazyRenderPage(pageNumber);
-						this.visiblePages.add(pageNumber);
 					} else {
 						this.lazyUnrenderPage(pageNumber);
-						this.visiblePages.delete(pageNumber);
-					}
-				}
-
-				// Update current page to the smallest visible page
-				if (this.visiblePages.size > 0) {
-					const newCurrentPage = Math.min(...this.visiblePages);
-					if (newCurrentPage !== this.currentPage) {
-						this.currentPage = newCurrentPage;
-						this.updatePageIndicator();
 					}
 				}
 			},
 			{
 				root: this.scrollContainer,
-				rootMargin: "150% 0px", // pre-render ±1.5 viewport heights for smoother fast scrolling
+				rootMargin: "150% 0px", // pre-render ±1.5 viewport heights
+			}
+		);
+
+		// Separate observer for accurate page tracking (no margin, high threshold)
+		this.pageTrackingObserver = new IntersectionObserver(
+			(entries) => {
+				// Find the page with highest intersection ratio (most visible)
+				let maxRatio = 0;
+				let mostVisiblePage = this.currentPage;
+
+				for (const entry of entries) {
+					if (entry.isIntersecting && entry.intersectionRatio > maxRatio) {
+						const pageNumber = parseInt(
+							(entry.target as HTMLElement).dataset.pageNumber ?? "0"
+						);
+						if (pageNumber) {
+							maxRatio = entry.intersectionRatio;
+							mostVisiblePage = pageNumber;
+						}
+					}
+				}
+
+				if (mostVisiblePage !== this.currentPage && maxRatio > 0) {
+					this.currentPage = mostVisiblePage;
+					this.updatePageIndicator();
+				}
+			},
+			{
+				root: this.scrollContainer,
+				rootMargin: "0px", // exact viewport boundaries
+				threshold: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0], // track visibility percentage
 			}
 		);
 
 		for (const pageInfo of this.renderer.getAllPageInfos()) {
 			this.intersectionObserver.observe(pageInfo.wrapper);
+			this.pageTrackingObserver.observe(pageInfo.wrapper);
 		}
 	}
 
@@ -305,11 +302,41 @@ export class PdfAnnotatorView extends FileView {
 	async onUnloadFile(file: TFile): Promise<void> {
 		this.intersectionObserver?.disconnect();
 		this.intersectionObserver = null;
+		this.pageTrackingObserver?.disconnect();
+		this.pageTrackingObserver = null;
 		this.highlightManager.destroy();
 		this.renderer.destroy();
 		if (this.scrollContainer) {
 			this.scrollContainer.empty();
 		}
 		await super.onUnloadFile(file);
+	}
+
+	/**
+	 * Undo the last annotation action
+	 */
+	undo(): void {
+		this.highlightManager.undo();
+	}
+
+	/**
+	 * Redo the last undone action
+	 */
+	redo(): void {
+		this.highlightManager.redo();
+	}
+
+	/**
+	 * Check if undo is available
+	 */
+	canUndo(): boolean {
+		return this.highlightManager.canUndo();
+	}
+
+	/**
+	 * Check if redo is available
+	 */
+	canRedo(): boolean {
+		return this.highlightManager.canRedo();
 	}
 }

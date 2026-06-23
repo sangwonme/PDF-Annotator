@@ -6,6 +6,14 @@ import type { Annotation, NormalizedRect, AnnotationSelector } from "./types";
 import { HIGHLIGHT_COLORS } from "./types";
 import { ColorPicker } from "./ColorPicker";
 import { NoteModal } from "./NoteModal";
+import {
+	UndoManager,
+	CreateHighlightCommand,
+	DeleteHighlightCommand,
+	EditCommentCommand,
+	ClearCommentCommand,
+	ChangeColorCommand
+} from "./UndoManager";
 
 function generateId(): string {
 	return Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
@@ -21,6 +29,7 @@ export class HighlightManager {
 	private file: TFile | null = null;
 	private abortController: AbortController | null = null;
 	private mouseMoveRAF: number | null = null;
+	private undoManager: UndoManager;
 
 	constructor(
 		renderer: PdfRenderer,
@@ -33,6 +42,7 @@ export class HighlightManager {
 		this.annotationLayer = annotationLayer;
 		this.app = app;
 		this.colorPicker = new ColorPicker();
+		this.undoManager = new UndoManager();
 	}
 
 	setup(scrollContainer: HTMLElement, file: TFile): void {
@@ -43,22 +53,45 @@ export class HighlightManager {
 
 		// Inline comment edit callback
 		this.annotationLayer.setCommentSaveCallback((annotationId, newComment) => {
-			this.store.updateAnnotation(annotationId, { comment: newComment });
-			this.store.saveAnnotations();
+			const annotation = this.store.getAnnotation(annotationId);
+			if (!annotation) return;
+
+			const command = new EditCommentCommand(
+				annotationId,
+				annotation.comment,
+				newComment,
+				this.store,
+				this.annotationLayer
+			);
+			this.undoManager.execute(command);
 		});
 
 		// Delete highlight + comment
 		this.annotationLayer.setAnnotationDeleteCallback((annotationId) => {
-			this.store.removeAnnotation(annotationId);
-			this.annotationLayer.removeHighlight(annotationId);
-			this.store.saveAnnotations();
+			const annotation = this.store.getAnnotation(annotationId);
+			if (!annotation) return;
+
+			const command = new DeleteHighlightCommand(
+				annotation,
+				this.store,
+				this.annotationLayer,
+				this.renderer
+			);
+			this.undoManager.execute(command);
 		});
 
 		// Clear comment only (keep highlight)
 		this.annotationLayer.setCommentClearCallback((annotationId) => {
-			this.store.updateAnnotation(annotationId, { comment: "" });
-			this.annotationLayer.updateHighlightComment(annotationId, false, "");
-			this.store.saveAnnotations();
+			const annotation = this.store.getAnnotation(annotationId);
+			if (!annotation) return;
+
+			const command = new ClearCommentCommand(
+				annotationId,
+				annotation.comment,
+				this.store,
+				this.annotationLayer
+			);
+			this.undoManager.execute(command);
 		});
 
 		// Text selection → color picker
@@ -102,6 +135,34 @@ export class HighlightManager {
 				lastHoveredId = null;
 			}
 		}, { signal });
+	}
+
+	/**
+	 * Undo the last annotation action
+	 */
+	undo(): void {
+		this.undoManager.undo();
+	}
+
+	/**
+	 * Redo the last undone action
+	 */
+	redo(): void {
+		this.undoManager.redo();
+	}
+
+	/**
+	 * Check if undo is available
+	 */
+	canUndo(): boolean {
+		return this.undoManager.canUndo();
+	}
+
+	/**
+	 * Check if redo is available
+	 */
+	canRedo(): boolean {
+		return this.undoManager.canRedo();
 	}
 
 	private findHighlightAt(x: number, y: number): HTMLElement | null {
@@ -156,8 +217,14 @@ export class HighlightManager {
 			comment: " ", // Temporary space to trigger card creation
 		};
 
-		this.store.addAnnotation(annotation);
-		this.annotationLayer.renderHighlight(renderedPage, annotation);
+		// Execute create command (adds to undo stack)
+		const command = new CreateHighlightCommand(
+			annotation,
+			this.store,
+			this.annotationLayer,
+			this.renderer
+		);
+		this.undoManager.execute(command);
 
 		// Clear selection before entering edit mode
 		selection.removeAllRanges();
@@ -263,9 +330,14 @@ export class HighlightManager {
 			menu.addItem((item) => {
 				item.setTitle(`Color: ${name}`)
 					.onClick(() => {
-						this.store.updateAnnotation(annotationId, { color: hex });
-						this.annotationLayer.updateHighlightColor(annotationId, hex);
-						this.store.saveAnnotations();
+						const command = new ChangeColorCommand(
+							annotationId,
+							annotation.color,
+							hex,
+							this.store,
+							this.annotationLayer
+						);
+						this.undoManager.execute(command);
 					});
 			});
 		}
@@ -276,9 +348,13 @@ export class HighlightManager {
 			item.setTitle("Delete")
 				.setIcon("trash")
 				.onClick(() => {
-					this.store.removeAnnotation(annotationId);
-					this.annotationLayer.removeHighlight(annotationId);
-					this.store.saveAnnotations();
+					const command = new DeleteHighlightCommand(
+						annotation,
+						this.store,
+						this.annotationLayer,
+						this.renderer
+					);
+					this.undoManager.execute(command);
 				});
 		});
 
@@ -290,9 +366,14 @@ export class HighlightManager {
 		if (!annotation) return;
 
 		new NoteModal(this.app, annotation.comment, (newComment) => {
-			this.store.updateAnnotation(annotationId, { comment: newComment });
-			this.annotationLayer.updateHighlightComment(annotationId, !!newComment, newComment);
-			this.store.saveAnnotations();
+			const command = new EditCommentCommand(
+				annotationId,
+				annotation.comment,
+				newComment,
+				this.store,
+				this.annotationLayer
+			);
+			this.undoManager.execute(command);
 		}).open();
 	}
 
