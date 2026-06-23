@@ -18,6 +18,10 @@ export class PdfAnnotatorView extends FileView {
 	private isZooming = false;
 	private intersectionObserver: IntersectionObserver | null = null;
 	private renderingPages: Set<number> = new Set();
+	private pageIndicator: HTMLDivElement | null = null;
+	private currentPage = 1;
+	private totalPages = 0;
+	private visiblePages: Set<number> = new Set();
 
 	constructor(leaf: WorkspaceLeaf, plugin: PdfAnnotatorPlugin) {
 		super(leaf);
@@ -56,6 +60,7 @@ export class PdfAnnotatorView extends FileView {
 
 		this.scrollContainer = container.createDiv({ cls: "pdf-annotator-scroll" });
 		this.setupZoomHandlers();
+		this.setupPageIndicator(container);
 	}
 
 	async onClose(): Promise<void> {
@@ -98,6 +103,47 @@ export class PdfAnnotatorView extends FileView {
 				}
 			}
 		}, { signal });
+	}
+
+	private setupPageIndicator(container: HTMLElement): void {
+		this.pageIndicator = container.createDiv({ cls: "pdf-annotator-page-indicator" });
+
+		// Previous button
+		const prevBtn = this.pageIndicator.createEl("button", {
+			cls: "pdf-annotator-page-nav-btn",
+			attr: { "aria-label": "Previous page" }
+		});
+		prevBtn.innerHTML = "←";
+		prevBtn.addEventListener("click", () => this.goToPage(this.currentPage - 1));
+
+		// Page number display
+		const pageDisplay = this.pageIndicator.createDiv({ cls: "pdf-annotator-page-display" });
+		pageDisplay.setText("0 / 0");
+
+		// Next button
+		const nextBtn = this.pageIndicator.createEl("button", {
+			cls: "pdf-annotator-page-nav-btn",
+			attr: { "aria-label": "Next page" }
+		});
+		nextBtn.innerHTML = "→";
+		nextBtn.addEventListener("click", () => this.goToPage(this.currentPage + 1));
+	}
+
+	private updatePageIndicator(): void {
+		if (!this.pageIndicator) return;
+		const display = this.pageIndicator.querySelector(".pdf-annotator-page-display");
+		if (display) {
+			display.setText(`${this.currentPage} / ${this.totalPages}`);
+		}
+	}
+
+	private goToPage(pageNumber: number): void {
+		if (pageNumber < 1 || pageNumber > this.totalPages) return;
+
+		const pageInfo = this.renderer.getPageInfo(pageNumber);
+		if (pageInfo && this.scrollContainer) {
+			pageInfo.wrapper.scrollIntoView({ behavior: "smooth", block: "start" });
+		}
 	}
 
 	private async zoom(direction: "in" | "out" | "reset"): Promise<void> {
@@ -157,6 +203,11 @@ export class PdfAnnotatorView extends FileView {
 			const data = await this.app.vault.readBinary(file);
 			const numPages = await this.renderer.loadDocument(data);
 
+			// Initialize page tracking
+			this.totalPages = numPages;
+			this.currentPage = 1;
+			this.updatePageIndicator();
+
 			// Load annotations
 			await this.store.loadAnnotations(file);
 
@@ -206,8 +257,19 @@ export class PdfAnnotatorView extends FileView {
 
 					if (entry.isIntersecting) {
 						this.lazyRenderPage(pageNumber);
+						this.visiblePages.add(pageNumber);
 					} else {
 						this.lazyUnrenderPage(pageNumber);
+						this.visiblePages.delete(pageNumber);
+					}
+				}
+
+				// Update current page to the smallest visible page
+				if (this.visiblePages.size > 0) {
+					const newCurrentPage = Math.min(...this.visiblePages);
+					if (newCurrentPage !== this.currentPage) {
+						this.currentPage = newCurrentPage;
+						this.updatePageIndicator();
 					}
 				}
 			},
