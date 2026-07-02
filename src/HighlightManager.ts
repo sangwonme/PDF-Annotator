@@ -5,7 +5,6 @@ import type { AnnotationLayer } from "./AnnotationLayer";
 import type { Annotation, NormalizedRect, AnnotationSelector } from "./types";
 import { HIGHLIGHT_COLORS } from "./types";
 import { ColorPicker } from "./ColorPicker";
-import { NoteModal } from "./NoteModal";
 import {
 	UndoManager,
 	CreateHighlightCommand,
@@ -365,16 +364,14 @@ export class HighlightManager {
 		const annotation = this.store.getAnnotation(annotationId);
 		if (!annotation) return;
 
-		new NoteModal(this.app, annotation.comment, (newComment) => {
-			const command = new EditCommentCommand(
-				annotationId,
-				annotation.comment,
-				newComment,
-				this.store,
-				this.annotationLayer
-			);
-			this.undoManager.execute(command);
-		}).open();
+		// If highlight has no comment, create a comment card first
+		if (!annotation.comment || annotation.comment.trim() === "") {
+			this.annotationLayer.updateHighlightComment(annotationId, true, " ");
+		}
+
+		// Enter inline edit mode (clear text if it was empty/space)
+		const shouldClear = !annotation.comment || annotation.comment.trim() === "";
+		this.annotationLayer.startEditingCard(annotationId, shouldClear);
 	}
 
 	destroy(): void {

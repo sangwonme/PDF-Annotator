@@ -103,12 +103,17 @@ export class PdfRenderer {
 		const viewport = page.getViewport({ scale: this.scale });
 
 		// Canvas layer — insert before annotation layer
+		// Use devicePixelRatio for high-resolution rendering
 		const canvas = document.createElement("canvas");
-		canvas.width = viewport.width;
-		canvas.height = viewport.height;
+		const dpr = window.devicePixelRatio || 1;
+		canvas.width = viewport.width * dpr;
+		canvas.height = viewport.height * dpr;
+		canvas.style.width = `${viewport.width}px`;
+		canvas.style.height = `${viewport.height}px`;
 		info.container.insertBefore(canvas, info.annotationLayerDiv);
 
 		const ctx = canvas.getContext("2d")!;
+		ctx.scale(dpr, dpr);
 		await page.render({ canvasContext: ctx, viewport }).promise;
 
 		// Text layer — append after annotation layer (topmost for selection)
@@ -173,11 +178,15 @@ export class PdfRenderer {
 		rendered.leftCommentMargin.style.minHeight = `${viewport.height}px`;
 		rendered.rightCommentMargin.style.minHeight = `${viewport.height}px`;
 
-		// Re-render canvas
+		// Re-render canvas with high-resolution support
 		const canvas = rendered.canvas;
-		canvas.width = viewport.width;
-		canvas.height = viewport.height;
+		const dpr = window.devicePixelRatio || 1;
+		canvas.width = viewport.width * dpr;
+		canvas.height = viewport.height * dpr;
+		canvas.style.width = `${viewport.width}px`;
+		canvas.style.height = `${viewport.height}px`;
 		const ctx = canvas.getContext("2d")!;
+		ctx.scale(dpr, dpr);
 		ctx.clearRect(0, 0, canvas.width, canvas.height);
 		await page.render({ canvasContext: ctx, viewport }).promise;
 

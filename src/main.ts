@@ -54,7 +54,35 @@ export default class PdfAnnotatorPlugin extends Plugin {
 			},
 		});
 
-		// Command: undo annotation
+		// Intercept Ctrl+Z/Ctrl+Shift+Z at document level (capturing phase)
+		// This runs BEFORE Obsidian's command system, allowing conditional handling
+		this.registerDomEvent(document, "keydown", (evt: KeyboardEvent) => {
+			if ((evt.ctrlKey || evt.metaKey) && evt.key === "z" && !evt.repeat) {
+				const activeView = this.app.workspace.getActiveViewOfType(PdfAnnotatorView);
+
+				if (evt.shiftKey) {
+					// Ctrl+Shift+Z → Redo
+					if (activeView?.canRedo()) {
+						evt.preventDefault();
+						evt.stopPropagation();
+						evt.stopImmediatePropagation();
+						activeView.redo();
+					}
+					// If can't redo, let event pass through to Obsidian
+				} else {
+					// Ctrl+Z → Undo
+					if (activeView?.canUndo()) {
+						evt.preventDefault();
+						evt.stopPropagation();
+						evt.stopImmediatePropagation();
+						activeView.undo();
+					}
+					// If can't undo, let event pass through to Obsidian
+				}
+			}
+		}, { capture: true });
+
+		// Commands for palette (no hotkeys to avoid conflict)
 		this.addCommand({
 			id: "pdf-annotator-undo",
 			name: "Undo annotation",
@@ -66,10 +94,8 @@ export default class PdfAnnotatorPlugin extends Plugin {
 				}
 				return false;
 			},
-			hotkeys: [{ modifiers: ["Mod"], key: "z" }],
 		});
 
-		// Command: redo annotation
 		this.addCommand({
 			id: "pdf-annotator-redo",
 			name: "Redo annotation",
@@ -81,7 +107,6 @@ export default class PdfAnnotatorPlugin extends Plugin {
 				}
 				return false;
 			},
-			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "z" }],
 		});
 	}
 
