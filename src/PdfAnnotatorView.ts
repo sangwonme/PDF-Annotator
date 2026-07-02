@@ -94,7 +94,7 @@ export class PdfAnnotatorView extends FileView {
 			}
 		}, { signal, passive: false });
 
-		// Ctrl/Cmd + +/- → zoom
+		// Ctrl/Cmd + +/-/0 → zoom
 		this.containerEl.addEventListener("keydown", (e) => {
 			if (e.ctrlKey || e.metaKey) {
 				if (e.key === "=" || e.key === "+") {
