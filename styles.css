@@ -308,6 +308,31 @@
 	border-color: var(--text-normal);
 }
 
+.pdf-annotator-color-picker-separator {
+	width: 1px;
+	background: var(--background-modifier-border);
+	align-self: stretch;
+	margin: 0 2px;
+}
+
+.pdf-annotator-dict-btn {
+	background: var(--background-secondary);
+	border-radius: 6px;
+	width: 28px;
+	height: 28px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--text-muted);
+}
+
+.pdf-annotator-dict-btn:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+	transform: scale(1.1);
+	border-color: transparent;
+}
+
 /* Note modal */
 .pdf-annotator-note-modal h3 {
 	margin-top: 0;

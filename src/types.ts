@@ -8,6 +8,8 @@ export const HIGHLIGHT_COLORS: Record<string, string> = {
 	orange: "#FFA726",
 };
 
+export const DICTIONARY_COLOR = "#D2B48C";
+
 export interface TextQuoteSelector {
 	type: "TextQuoteSelector";
 	exact: string;

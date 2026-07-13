@@ -1,10 +1,11 @@
-import { App, Menu, TFile } from "obsidian";
+import { App, Menu, Notice, TFile } from "obsidian";
 import type { PdfRenderer, RenderedPage } from "./PdfRenderer";
 import type { AnnotationStore } from "./AnnotationStore";
 import type { AnnotationLayer } from "./AnnotationLayer";
 import type { Annotation, NormalizedRect, AnnotationSelector } from "./types";
-import { HIGHLIGHT_COLORS } from "./types";
+import { DICTIONARY_COLOR, HIGHLIGHT_COLORS } from "./types";
 import { ColorPicker } from "./ColorPicker";
+import { DictionaryService } from "./DictionaryService";
 import {
 	UndoManager,
 	CreateHighlightCommand,
@@ -24,6 +25,7 @@ export class HighlightManager {
 	private annotationLayer: AnnotationLayer;
 	private app: App;
 	private colorPicker: ColorPicker;
+	private dictionaryService: DictionaryService;
 	private scrollContainer: HTMLElement | null = null;
 	private file: TFile | null = null;
 	private abortController: AbortController | null = null;
@@ -41,6 +43,7 @@ export class HighlightManager {
 		this.annotationLayer = annotationLayer;
 		this.app = app;
 		this.colorPicker = new ColorPicker();
+		this.dictionaryService = new DictionaryService();
 		this.undoManager = new UndoManager();
 	}
 
@@ -191,10 +194,58 @@ export class HighlightManager {
 		// Show color picker near the selection
 		const rect = range.getBoundingClientRect();
 		this.colorPicker.show(
-			rect.left + rect.width / 2 - 60,
+			rect.left + rect.width / 2 - 75,
 			rect.bottom + 5,
-			(color) => this.createHighlight(selection, pageNumber, color)
+			(color) => this.createHighlight(selection, pageNumber, color),
+			() => this.handleDictionaryLookup(selection, pageNumber)
 		);
+	}
+
+	private handleDictionaryLookup(selection: Selection, pageNumber: number): void {
+		if (selection.isCollapsed) return;
+		const range = selection.getRangeAt(0);
+		const renderedPage = this.renderer.getRenderedPage(pageNumber);
+		if (!renderedPage) return;
+
+		const selectedText = selection.toString().trim();
+		const selectors = this.buildSelectors(selection, range, renderedPage);
+		selection.removeAllRanges();
+
+		this.dictionaryService.lookup(selectedText).then(entry => {
+			const comment = entry
+				? entry.formatted
+				: `📖 ${selectedText}\n(정의를 찾을 수 없습니다)`;
+			this.createHighlightWithComment(selectors, pageNumber, DICTIONARY_COLOR, comment);
+		}).catch(() => {
+			new Notice("사전 검색 중 오류가 발생했습니다.");
+		});
+	}
+
+	private createHighlightWithComment(
+		selectors: AnnotationSelector[],
+		pageNumber: number,
+		color: string,
+		comment: string
+	): void {
+		const now = new Date().toISOString();
+		const annotation: Annotation = {
+			id: generateId(),
+			type: "highlight",
+			color,
+			created: now,
+			modified: now,
+			pageNumber,
+			selectors,
+			comment,
+		};
+
+		const command = new CreateHighlightCommand(
+			annotation,
+			this.store,
+			this.annotationLayer,
+			this.renderer
+		);
+		this.undoManager.execute(command);
 	}
 
 	private createHighlight(selection: Selection, pageNumber: number, color: string): void {
