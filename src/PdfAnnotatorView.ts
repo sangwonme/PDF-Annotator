@@ -17,7 +17,11 @@ export class PdfAnnotatorView extends FileView {
 	private zoomAbortController: AbortController | null = null;
 	private isZooming = false;
 	private intersectionObserver: IntersectionObserver | null = null;
+	private pageTrackingObserver: IntersectionObserver | null = null;
 	private renderingPages: Set<number> = new Set();
+	private pageIndicator: HTMLDivElement | null = null;
+	private currentPage = 1;
+	private totalPages = 0;
 
 	constructor(leaf: WorkspaceLeaf, plugin: PdfAnnotatorPlugin) {
 		super(leaf);
@@ -54,6 +58,11 @@ export class PdfAnnotatorView extends FileView {
 		container.empty();
 		container.addClass("pdf-annotator-container");
 
+		// Header with page indicator
+		const header = container.createDiv({ cls: "pdf-annotator-header" });
+		this.setupPageIndicator(header);
+
+		// Scroll container for PDF content
 		this.scrollContainer = container.createDiv({ cls: "pdf-annotator-scroll" });
 		this.setupZoomHandlers();
 	}
@@ -61,6 +70,8 @@ export class PdfAnnotatorView extends FileView {
 	async onClose(): Promise<void> {
 		this.intersectionObserver?.disconnect();
 		this.intersectionObserver = null;
+		this.pageTrackingObserver?.disconnect();
+		this.pageTrackingObserver = null;
 		this.zoomAbortController?.abort();
 		this.highlightManager.destroy();
 		this.renderer.destroy();
@@ -83,7 +94,7 @@ export class PdfAnnotatorView extends FileView {
 			}
 		}, { signal, passive: false });
 
-		// Ctrl/Cmd + +/- → zoom
+		// Ctrl/Cmd + +/-/0 → zoom
 		this.containerEl.addEventListener("keydown", (e) => {
 			if (e.ctrlKey || e.metaKey) {
 				if (e.key === "=" || e.key === "+") {
@@ -98,6 +109,16 @@ export class PdfAnnotatorView extends FileView {
 				}
 			}
 		}, { signal });
+	}
+
+	private setupPageIndicator(header: HTMLElement): void {
+		this.pageIndicator = header.createDiv({ cls: "pdf-annotator-page-indicator" });
+		this.pageIndicator.setText("0 / 0");
+	}
+
+	private updatePageIndicator(): void {
+		if (!this.pageIndicator) return;
+		this.pageIndicator.setText(`${this.currentPage} / ${this.totalPages}`);
 	}
 
 	private async zoom(direction: "in" | "out" | "reset"): Promise<void> {
@@ -126,12 +147,12 @@ export class PdfAnnotatorView extends FileView {
 			await this.renderer.updateAllPlaceholders();
 			await this.renderer.reRenderAllPages();
 
-			// Re-render all annotations at new viewport positions
+			// Re-render annotations only for rendered pages (not placeholders)
 			this.annotationLayer.clear();
-			for (const pageInfo of this.renderer.getAllPageInfos()) {
-				const pageAnnotations = this.store.getAnnotationsForPage(pageInfo.pageNumber);
+			for (const rendered of this.renderer.getAllRenderedPages()) {
+				const pageAnnotations = this.store.getAnnotationsForPage(rendered.pageNumber);
 				for (const annotation of pageAnnotations) {
-					this.annotationLayer.renderHighlight(pageInfo, annotation);
+					this.annotationLayer.renderHighlight(rendered, annotation);
 				}
 			}
 
@@ -156,6 +177,11 @@ export class PdfAnnotatorView extends FileView {
 			// Load PDF
 			const data = await this.app.vault.readBinary(file);
 			const numPages = await this.renderer.loadDocument(data);
+
+			// Initialize page tracking
+			this.totalPages = numPages;
+			this.currentPage = 1;
+			this.updatePageIndicator();
 
 			// Load annotations
 			await this.store.loadAnnotations(file);
@@ -196,6 +222,7 @@ export class PdfAnnotatorView extends FileView {
 
 		this.intersectionObserver?.disconnect();
 
+		// Observer for lazy rendering (wide margin for pre-rendering)
 		this.intersectionObserver = new IntersectionObserver(
 			(entries) => {
 				for (const entry of entries) {
@@ -213,13 +240,72 @@ export class PdfAnnotatorView extends FileView {
 			},
 			{
 				root: this.scrollContainer,
-				rootMargin: "100% 0px", // pre-render ±1 viewport height
+				rootMargin: "150% 0px", // pre-render ±1.5 viewport heights
+			}
+		);
+
+		// Separate observer for accurate page tracking
+		// Strategy: when ANY page changes visibility, check currentPage ± 2 to find most visible
+		this.pageTrackingObserver = new IntersectionObserver(
+			(entries) => {
+				// Only recalculate if something actually changed
+				if (entries.length === 0) return;
+
+				let maxRatio = 0;
+				let mostVisiblePage = this.currentPage;
+
+				// Check pages around current page (± 2 range)
+				const startPage = Math.max(1, this.currentPage - 2);
+				const endPage = Math.min(this.totalPages, this.currentPage + 2);
+
+				for (let pageNum = startPage; pageNum <= endPage; pageNum++) {
+					const pageInfo = this.renderer.getPageInfo(pageNum);
+					if (!pageInfo) continue;
+
+					const visibleRatio = this.calculateVisibleRatio(pageInfo.wrapper);
+					if (visibleRatio > maxRatio) {
+						maxRatio = visibleRatio;
+						mostVisiblePage = pageNum;
+					}
+				}
+
+				if (mostVisiblePage !== this.currentPage && maxRatio > 0) {
+					this.currentPage = mostVisiblePage;
+					this.updatePageIndicator();
+				}
+			},
+			{
+				root: this.scrollContainer,
+				rootMargin: "0px", // exact viewport boundaries
+				threshold: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0], // track visibility percentage
 			}
 		);
 
 		for (const pageInfo of this.renderer.getAllPageInfos()) {
 			this.intersectionObserver.observe(pageInfo.wrapper);
+			this.pageTrackingObserver.observe(pageInfo.wrapper);
 		}
+	}
+
+	/**
+	 * Calculate what fraction of an element is visible within the scroll container.
+	 * Returns a value between 0 (not visible) and 1 (fully visible).
+	 */
+	private calculateVisibleRatio(element: HTMLElement): number {
+		if (!this.scrollContainer) return 0;
+
+		const elementRect = element.getBoundingClientRect();
+		const containerRect = this.scrollContainer.getBoundingClientRect();
+
+		// Calculate visible bounds
+		const visibleTop = Math.max(elementRect.top, containerRect.top);
+		const visibleBottom = Math.min(elementRect.bottom, containerRect.bottom);
+		const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+
+		const elementHeight = elementRect.height;
+		if (elementHeight === 0) return 0;
+
+		return visibleHeight / elementHeight;
 	}
 
 	private async lazyRenderPage(pageNumber: number): Promise<void> {
@@ -243,11 +329,41 @@ export class PdfAnnotatorView extends FileView {
 	async onUnloadFile(file: TFile): Promise<void> {
 		this.intersectionObserver?.disconnect();
 		this.intersectionObserver = null;
+		this.pageTrackingObserver?.disconnect();
+		this.pageTrackingObserver = null;
 		this.highlightManager.destroy();
 		this.renderer.destroy();
 		if (this.scrollContainer) {
 			this.scrollContainer.empty();
 		}
 		await super.onUnloadFile(file);
+	}
+
+	/**
+	 * Undo the last annotation action
+	 */
+	undo(): void {
+		this.highlightManager.undo();
+	}
+
+	/**
+	 * Redo the last undone action
+	 */
+	redo(): void {
+		this.highlightManager.redo();
+	}
+
+	/**
+	 * Check if undo is available
+	 */
+	canUndo(): boolean {
+		return this.highlightManager.canUndo();
+	}
+
+	/**
+	 * Check if redo is available
+	 */
+	canRedo(): boolean {
+		return this.highlightManager.canRedo();
 	}
 }

@@ -1,11 +1,19 @@
-import { App, Menu, TFile } from "obsidian";
+import { App, Menu, Notice, TFile } from "obsidian";
 import type { PdfRenderer, RenderedPage } from "./PdfRenderer";
 import type { AnnotationStore } from "./AnnotationStore";
 import type { AnnotationLayer } from "./AnnotationLayer";
 import type { Annotation, NormalizedRect, AnnotationSelector } from "./types";
-import { HIGHLIGHT_COLORS } from "./types";
+import { DICTIONARY_COLOR, HIGHLIGHT_COLORS } from "./types";
 import { ColorPicker } from "./ColorPicker";
-import { NoteModal } from "./NoteModal";
+import { DictionaryService } from "./DictionaryService";
+import {
+	UndoManager,
+	CreateHighlightCommand,
+	DeleteHighlightCommand,
+	EditCommentCommand,
+	ClearCommentCommand,
+	ChangeColorCommand
+} from "./UndoManager";
 
 function generateId(): string {
 	return Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
@@ -17,9 +25,12 @@ export class HighlightManager {
 	private annotationLayer: AnnotationLayer;
 	private app: App;
 	private colorPicker: ColorPicker;
+	private dictionaryService: DictionaryService;
 	private scrollContainer: HTMLElement | null = null;
 	private file: TFile | null = null;
 	private abortController: AbortController | null = null;
+	private mouseMoveRAF: number | null = null;
+	private undoManager: UndoManager;
 
 	constructor(
 		renderer: PdfRenderer,
@@ -32,6 +43,8 @@ export class HighlightManager {
 		this.annotationLayer = annotationLayer;
 		this.app = app;
 		this.colorPicker = new ColorPicker();
+		this.dictionaryService = new DictionaryService();
+		this.undoManager = new UndoManager();
 	}
 
 	setup(scrollContainer: HTMLElement, file: TFile): void {
@@ -42,22 +55,45 @@ export class HighlightManager {
 
 		// Inline comment edit callback
 		this.annotationLayer.setCommentSaveCallback((annotationId, newComment) => {
-			this.store.updateAnnotation(annotationId, { comment: newComment });
-			this.store.saveAnnotations();
+			const annotation = this.store.getAnnotation(annotationId);
+			if (!annotation) return;
+
+			const command = new EditCommentCommand(
+				annotationId,
+				annotation.comment,
+				newComment,
+				this.store,
+				this.annotationLayer
+			);
+			this.undoManager.execute(command);
 		});
 
 		// Delete highlight + comment
 		this.annotationLayer.setAnnotationDeleteCallback((annotationId) => {
-			this.store.removeAnnotation(annotationId);
-			this.annotationLayer.removeHighlight(annotationId);
-			this.store.saveAnnotations();
+			const annotation = this.store.getAnnotation(annotationId);
+			if (!annotation) return;
+
+			const command = new DeleteHighlightCommand(
+				annotation,
+				this.store,
+				this.annotationLayer,
+				this.renderer
+			);
+			this.undoManager.execute(command);
 		});
 
 		// Clear comment only (keep highlight)
 		this.annotationLayer.setCommentClearCallback((annotationId) => {
-			this.store.updateAnnotation(annotationId, { comment: "" });
-			this.annotationLayer.updateHighlightComment(annotationId, false, "");
-			this.store.saveAnnotations();
+			const annotation = this.store.getAnnotation(annotationId);
+			if (!annotation) return;
+
+			const command = new ClearCommentCommand(
+				annotationId,
+				annotation.comment,
+				this.store,
+				this.annotationLayer
+			);
+			this.undoManager.execute(command);
 		});
 
 		// Text selection → color picker
@@ -75,18 +111,24 @@ export class HighlightManager {
 				}
 			}
 		}, { signal });
-		// Hover tracking for highlights below text layer
+		// Hover tracking for highlights below text layer - throttled with RAF
 		let lastHoveredId: string | null = null;
 		scrollContainer.addEventListener("mousemove", (e) => {
-			const highlightEl = this.findHighlightAt(e.clientX, e.clientY);
-			const id = highlightEl?.dataset.annotationId ?? null;
-			if (id !== lastHoveredId) {
-				if (lastHoveredId) this.annotationLayer.setActive(lastHoveredId, false);
-				if (id) this.annotationLayer.setActive(id, true);
-				lastHoveredId = id;
-			}
-			// Change cursor based on whether hovering a highlight
-			scrollContainer.style.cursor = id ? "pointer" : "";
+			// Throttle with requestAnimationFrame for smooth performance
+			if (this.mouseMoveRAF !== null) return;
+
+			this.mouseMoveRAF = requestAnimationFrame(() => {
+				const highlightEl = this.findHighlightAt(e.clientX, e.clientY);
+				const id = highlightEl?.dataset.annotationId ?? null;
+				if (id !== lastHoveredId) {
+					if (lastHoveredId) this.annotationLayer.setActive(lastHoveredId, false);
+					if (id) this.annotationLayer.setActive(id, true);
+					lastHoveredId = id;
+				}
+				// Change cursor based on whether hovering a highlight
+				scrollContainer.style.cursor = id ? "pointer" : "";
+				this.mouseMoveRAF = null;
+			});
 		}, { signal });
 
 		scrollContainer.addEventListener("mouseleave", () => {
@@ -95,6 +137,34 @@ export class HighlightManager {
 				lastHoveredId = null;
 			}
 		}, { signal });
+	}
+
+	/**
+	 * Undo the last annotation action
+	 */
+	undo(): void {
+		this.undoManager.undo();
+	}
+
+	/**
+	 * Redo the last undone action
+	 */
+	redo(): void {
+		this.undoManager.redo();
+	}
+
+	/**
+	 * Check if undo is available
+	 */
+	canUndo(): boolean {
+		return this.undoManager.canUndo();
+	}
+
+	/**
+	 * Check if redo is available
+	 */
+	canRedo(): boolean {
+		return this.undoManager.canRedo();
 	}
 
 	private findHighlightAt(x: number, y: number): HTMLElement | null {
@@ -124,10 +194,58 @@ export class HighlightManager {
 		// Show color picker near the selection
 		const rect = range.getBoundingClientRect();
 		this.colorPicker.show(
-			rect.left + rect.width / 2 - 60,
+			rect.left + rect.width / 2 - 75,
 			rect.bottom + 5,
-			(color) => this.createHighlight(selection, pageNumber, color)
+			(color) => this.createHighlight(selection, pageNumber, color),
+			() => this.handleDictionaryLookup(selection, pageNumber)
 		);
+	}
+
+	private handleDictionaryLookup(selection: Selection, pageNumber: number): void {
+		if (selection.isCollapsed) return;
+		const range = selection.getRangeAt(0);
+		const renderedPage = this.renderer.getRenderedPage(pageNumber);
+		if (!renderedPage) return;
+
+		const selectedText = selection.toString().trim();
+		const selectors = this.buildSelectors(selection, range, renderedPage);
+		selection.removeAllRanges();
+
+		this.dictionaryService.lookup(selectedText).then(entry => {
+			const comment = entry
+				? entry.formatted
+				: `📖 ${selectedText}\n(정의를 찾을 수 없습니다)`;
+			this.createHighlightWithComment(selectors, pageNumber, DICTIONARY_COLOR, comment);
+		}).catch(() => {
+			new Notice("사전 검색 중 오류가 발생했습니다.");
+		});
+	}
+
+	private createHighlightWithComment(
+		selectors: AnnotationSelector[],
+		pageNumber: number,
+		color: string,
+		comment: string
+	): void {
+		const now = new Date().toISOString();
+		const annotation: Annotation = {
+			id: generateId(),
+			type: "highlight",
+			color,
+			created: now,
+			modified: now,
+			pageNumber,
+			selectors,
+			comment,
+		};
+
+		const command = new CreateHighlightCommand(
+			annotation,
+			this.store,
+			this.annotationLayer,
+			this.renderer
+		);
+		this.undoManager.execute(command);
 	}
 
 	private createHighlight(selection: Selection, pageNumber: number, color: string): void {
@@ -146,14 +264,23 @@ export class HighlightManager {
 			modified: now,
 			pageNumber,
 			selectors,
-			comment: "",
+			comment: " ", // Temporary space to trigger card creation
 		};
 
-		this.store.addAnnotation(annotation);
-		this.annotationLayer.renderHighlight(renderedPage, annotation);
-		this.store.saveAnnotations();
+		// Execute create command (adds to undo stack)
+		const command = new CreateHighlightCommand(
+			annotation,
+			this.store,
+			this.annotationLayer,
+			this.renderer
+		);
+		this.undoManager.execute(command);
 
+		// Clear selection before entering edit mode
 		selection.removeAllRanges();
+
+		// Auto-enter edit mode for inline commenting (clear text for new highlight)
+		this.annotationLayer.startEditingCard(annotation.id, true);
 	}
 
 	private buildSelectors(selection: Selection, range: Range, renderedPage: RenderedPage): AnnotationSelector[] {
@@ -253,9 +380,14 @@ export class HighlightManager {
 			menu.addItem((item) => {
 				item.setTitle(`Color: ${name}`)
 					.onClick(() => {
-						this.store.updateAnnotation(annotationId, { color: hex });
-						this.annotationLayer.updateHighlightColor(annotationId, hex);
-						this.store.saveAnnotations();
+						const command = new ChangeColorCommand(
+							annotationId,
+							annotation.color,
+							hex,
+							this.store,
+							this.annotationLayer
+						);
+						this.undoManager.execute(command);
 					});
 			});
 		}
@@ -266,9 +398,13 @@ export class HighlightManager {
 			item.setTitle("Delete")
 				.setIcon("trash")
 				.onClick(() => {
-					this.store.removeAnnotation(annotationId);
-					this.annotationLayer.removeHighlight(annotationId);
-					this.store.saveAnnotations();
+					const command = new DeleteHighlightCommand(
+						annotation,
+						this.store,
+						this.annotationLayer,
+						this.renderer
+					);
+					this.undoManager.execute(command);
 				});
 		});
 
@@ -279,16 +415,23 @@ export class HighlightManager {
 		const annotation = this.store.getAnnotation(annotationId);
 		if (!annotation) return;
 
-		new NoteModal(this.app, annotation.comment, (newComment) => {
-			this.store.updateAnnotation(annotationId, { comment: newComment });
-			this.annotationLayer.updateHighlightComment(annotationId, !!newComment, newComment);
-			this.store.saveAnnotations();
-		}).open();
+		// If highlight has no comment, create a comment card first
+		if (!annotation.comment || annotation.comment.trim() === "") {
+			this.annotationLayer.updateHighlightComment(annotationId, true, " ");
+		}
+
+		// Enter inline edit mode (clear text if it was empty/space)
+		const shouldClear = !annotation.comment || annotation.comment.trim() === "";
+		this.annotationLayer.startEditingCard(annotationId, shouldClear);
 	}
 
 	destroy(): void {
 		this.abortController?.abort();
 		this.abortController = null;
+		if (this.mouseMoveRAF !== null) {
+			cancelAnimationFrame(this.mouseMoveRAF);
+			this.mouseMoveRAF = null;
+		}
 		this.colorPicker.hide();
 		this.scrollContainer = null;
 		this.file = null;

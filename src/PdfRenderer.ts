@@ -12,7 +12,8 @@ export interface PageInfo {
 	wrapper: HTMLDivElement;
 	container: HTMLDivElement;
 	annotationLayerDiv: HTMLDivElement;
-	commentMargin: HTMLDivElement;
+	leftCommentMargin: HTMLDivElement;
+	rightCommentMargin: HTMLDivElement;
 	viewport: pdfjsLib.PageViewport;
 }
 
@@ -37,7 +38,7 @@ export class PdfRenderer {
 	}
 
 	/**
-	 * Create a correctly-sized placeholder (wrapper + container + comment margin)
+	 * Create a correctly-sized placeholder (wrapper + container + comment margins)
 	 * without rendering any canvas or text layer. This is cheap and establishes
 	 * the full scroll height for all pages.
 	 */
@@ -47,10 +48,16 @@ export class PdfRenderer {
 		const page: PDFPageProxy = await this.pdfDoc.getPage(pageNumber);
 		const viewport = page.getViewport({ scale: this.scale });
 
-		// Wrapper (page + comment margin)
+		// Wrapper (left margin + page + right margin)
 		const wrapper = document.createElement("div");
 		wrapper.className = "pdf-annotator-page-wrapper";
 		wrapper.dataset.pageNumber = String(pageNumber);
+
+		// Left comment margin
+		const leftCommentMargin = document.createElement("div");
+		leftCommentMargin.className = "pdf-annotator-comment-margin pdf-annotator-comment-margin-left";
+		leftCommentMargin.style.minHeight = `${viewport.height}px`;
+		wrapper.appendChild(leftCommentMargin);
 
 		// Page container
 		const container = document.createElement("div");
@@ -61,11 +68,11 @@ export class PdfRenderer {
 		container.style.position = "relative";
 		wrapper.appendChild(container);
 
-		// Comment margin (right side)
-		const commentMargin = document.createElement("div");
-		commentMargin.className = "pdf-annotator-comment-margin";
-		commentMargin.style.minHeight = `${viewport.height}px`;
-		wrapper.appendChild(commentMargin);
+		// Right comment margin
+		const rightCommentMargin = document.createElement("div");
+		rightCommentMargin.className = "pdf-annotator-comment-margin pdf-annotator-comment-margin-right";
+		rightCommentMargin.style.minHeight = `${viewport.height}px`;
+		wrapper.appendChild(rightCommentMargin);
 
 		// Annotation layer (will sit between canvas and text layer once rendered)
 		const annotationLayerDiv = document.createElement("div");
@@ -73,7 +80,7 @@ export class PdfRenderer {
 		container.appendChild(annotationLayerDiv);
 
 		const info: PageInfo = {
-			pageNumber, wrapper, container, annotationLayerDiv, commentMargin, viewport,
+			pageNumber, wrapper, container, annotationLayerDiv, leftCommentMargin, rightCommentMargin, viewport,
 		};
 		this.pages.set(pageNumber, info);
 		return info;
@@ -96,12 +103,17 @@ export class PdfRenderer {
 		const viewport = page.getViewport({ scale: this.scale });
 
 		// Canvas layer — insert before annotation layer
+		// Use devicePixelRatio for high-resolution rendering
 		const canvas = document.createElement("canvas");
-		canvas.width = viewport.width;
-		canvas.height = viewport.height;
+		const dpr = window.devicePixelRatio || 1;
+		canvas.width = viewport.width * dpr;
+		canvas.height = viewport.height * dpr;
+		canvas.style.width = `${viewport.width}px`;
+		canvas.style.height = `${viewport.height}px`;
 		info.container.insertBefore(canvas, info.annotationLayerDiv);
 
 		const ctx = canvas.getContext("2d")!;
+		ctx.scale(dpr, dpr);
 		await page.render({ canvasContext: ctx, viewport }).promise;
 
 		// Text layer — append after annotation layer (topmost for selection)
@@ -163,13 +175,18 @@ export class PdfRenderer {
 		// Update container size
 		rendered.container.style.width = `${viewport.width}px`;
 		rendered.container.style.height = `${viewport.height}px`;
-		rendered.commentMargin.style.minHeight = `${viewport.height}px`;
+		rendered.leftCommentMargin.style.minHeight = `${viewport.height}px`;
+		rendered.rightCommentMargin.style.minHeight = `${viewport.height}px`;
 
-		// Re-render canvas
+		// Re-render canvas with high-resolution support
 		const canvas = rendered.canvas;
-		canvas.width = viewport.width;
-		canvas.height = viewport.height;
+		const dpr = window.devicePixelRatio || 1;
+		canvas.width = viewport.width * dpr;
+		canvas.height = viewport.height * dpr;
+		canvas.style.width = `${viewport.width}px`;
+		canvas.style.height = `${viewport.height}px`;
 		const ctx = canvas.getContext("2d")!;
+		ctx.scale(dpr, dpr);
 		ctx.clearRect(0, 0, canvas.width, canvas.height);
 		await page.render({ canvasContext: ctx, viewport }).promise;
 
@@ -208,7 +225,8 @@ export class PdfRenderer {
 			const viewport = page.getViewport({ scale: this.scale });
 			info.container.style.width = `${viewport.width}px`;
 			info.container.style.height = `${viewport.height}px`;
-			info.commentMargin.style.minHeight = `${viewport.height}px`;
+			info.leftCommentMargin.style.minHeight = `${viewport.height}px`;
+			info.rightCommentMargin.style.minHeight = `${viewport.height}px`;
 			info.viewport = viewport;
 		}
 	}
