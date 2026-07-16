@@ -84,6 +84,10 @@ export class AnnotationLayer {
 		}
 	}
 
+	hasAnnotation(annotationId: string): boolean {
+		return this.entries.has(annotationId);
+	}
+
 	/**
 	 * Start editing a comment card (for inline editing on new highlights).
 	 * @param clearText If true, starts with empty textarea (for new highlights)

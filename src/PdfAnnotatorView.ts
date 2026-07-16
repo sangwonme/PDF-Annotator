@@ -147,7 +147,7 @@ export class PdfAnnotatorView extends FileView {
 			await this.renderer.updateAllPlaceholders();
 			await this.renderer.reRenderAllPages();
 
-			// Re-render annotations only for rendered pages (not placeholders)
+			// Re-render annotations only for rendered pages (visible)
 			this.annotationLayer.clear();
 			for (const rendered of this.renderer.getAllRenderedPages()) {
 				const pageAnnotations = this.store.getAnnotationsForPage(rendered.pageNumber);
@@ -233,6 +233,7 @@ export class PdfAnnotatorView extends FileView {
 
 					if (entry.isIntersecting) {
 						this.lazyRenderPage(pageNumber);
+						this.renderPageAnnotations(pageNumber);
 					} else {
 						this.lazyUnrenderPage(pageNumber);
 					}
@@ -324,6 +325,23 @@ export class PdfAnnotatorView extends FileView {
 
 	private lazyUnrenderPage(pageNumber: number): void {
 		this.renderer.unrenderPageContent(pageNumber);
+	}
+
+	/**
+	 * Render annotations for a page if they haven't been rendered yet.
+	 * Called when a page enters the viewport (e.g., after zoom or scroll).
+	 */
+	private renderPageAnnotations(pageNumber: number): void {
+		const pageInfo = this.renderer.getPageInfo(pageNumber);
+		if (!pageInfo) return;
+
+		const pageAnnotations = this.store.getAnnotationsForPage(pageNumber);
+		for (const annotation of pageAnnotations) {
+			// Render only if not already rendered (avoid duplicates)
+			if (!this.annotationLayer.hasAnnotation(annotation.id)) {
+				this.annotationLayer.renderHighlight(pageInfo, annotation);
+			}
+		}
 	}
 
 	async onUnloadFile(file: TFile): Promise<void> {
