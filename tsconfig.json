@@ -11,7 +11,7 @@
 		"importHelpers": true,
 		"isolatedModules": true,
 		"strictNullChecks": true,
-		"lib": ["DOM", "ES2021", "ES2022.Error"]
+		"lib": ["DOM", "DOM.Iterable", "ES2021", "ES2022.Error"]
 	},
 	"include": ["src/**/*.ts"]
 }

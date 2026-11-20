@@ -68,8 +68,4 @@ export class ColorPicker {
 		this.containerEl = null;
 		this.onSelect = null;
 	}
-
-	isVisible(): boolean {
-		return this.containerEl !== null;
-	}
 }

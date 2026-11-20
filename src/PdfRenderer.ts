@@ -9,17 +9,18 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(workerBlob);
 
 export interface PageInfo {
 	pageNumber: number;
+	pdfPage: PDFPageProxy;
 	wrapper: HTMLDivElement;
 	container: HTMLDivElement;
 	annotationLayerDiv: HTMLDivElement;
 	leftCommentMargin: HTMLDivElement;
 	rightCommentMargin: HTMLDivElement;
-	viewport: pdfjsLib.PageViewport;
 }
 
 export interface RenderedPage extends PageInfo {
 	canvas: HTMLCanvasElement;
 	textLayerDiv: HTMLDivElement;
+	textLayer: TextLayer;
 }
 
 export class PdfRenderer {
@@ -45,8 +46,7 @@ export class PdfRenderer {
 	async createPlaceholder(pageNumber: number): Promise<PageInfo> {
 		if (!this.pdfDoc) throw new Error("No document loaded");
 
-		const page: PDFPageProxy = await this.pdfDoc.getPage(pageNumber);
-		const viewport = page.getViewport({ scale: this.scale });
+		const pdfPage: PDFPageProxy = await this.pdfDoc.getPage(pageNumber);
 
 		// Wrapper (left margin + page + right margin)
 		const wrapper = document.createElement("div");
@@ -56,22 +56,18 @@ export class PdfRenderer {
 		// Left comment margin
 		const leftCommentMargin = document.createElement("div");
 		leftCommentMargin.className = "pdf-annotator-comment-margin pdf-annotator-comment-margin-left";
-		leftCommentMargin.style.minHeight = `${viewport.height}px`;
 		wrapper.appendChild(leftCommentMargin);
 
 		// Page container
 		const container = document.createElement("div");
 		container.className = "pdf-annotator-page";
 		container.dataset.pageNumber = String(pageNumber);
-		container.style.width = `${viewport.width}px`;
-		container.style.height = `${viewport.height}px`;
 		container.style.position = "relative";
 		wrapper.appendChild(container);
 
 		// Right comment margin
 		const rightCommentMargin = document.createElement("div");
 		rightCommentMargin.className = "pdf-annotator-comment-margin pdf-annotator-comment-margin-right";
-		rightCommentMargin.style.minHeight = `${viewport.height}px`;
 		wrapper.appendChild(rightCommentMargin);
 
 		// Annotation layer (will sit between canvas and text layer once rendered)
@@ -80,10 +76,32 @@ export class PdfRenderer {
 		container.appendChild(annotationLayerDiv);
 
 		const info: PageInfo = {
-			pageNumber, wrapper, container, annotationLayerDiv, leftCommentMargin, rightCommentMargin, viewport,
+			pageNumber, pdfPage, wrapper, container, annotationLayerDiv, leftCommentMargin, rightCommentMargin,
 		};
+		this.applySize(info);
 		this.pages.set(pageNumber, info);
 		return info;
+	}
+
+	/** Size a page box and its comment margins for the current scale. */
+	private applySize(info: PageInfo): void {
+		const { width, height } = info.pdfPage.getViewport({ scale: this.scale });
+		info.container.style.width = `${width}px`;
+		info.container.style.height = `${height}px`;
+		info.leftCommentMargin.style.minHeight = `${height}px`;
+		info.rightCommentMargin.style.minHeight = `${height}px`;
+	}
+
+	/** Draw a page into a new canvas backed by devicePixelRatio pixels; CSS sizes it to the page box. */
+	private async drawCanvas(pdfPage: PDFPageProxy, viewport: pdfjsLib.PageViewport): Promise<HTMLCanvasElement> {
+		const canvas = document.createElement("canvas");
+		const dpr = window.devicePixelRatio || 1;
+		canvas.width = viewport.width * dpr;
+		canvas.height = viewport.height * dpr;
+		const ctx = canvas.getContext("2d")!;
+		ctx.scale(dpr, dpr);
+		await pdfPage.render({ canvasContext: ctx, viewport }).promise;
+		return canvas;
 	}
 
 	/**
@@ -91,51 +109,36 @@ export class PdfRenderer {
 	 * placeholder. No-op if the page is already rendered.
 	 */
 	async renderPageContent(pageNumber: number): Promise<RenderedPage> {
-		if (!this.pdfDoc) throw new Error("No document loaded");
-
 		const existing = this.renderedPages.get(pageNumber);
 		if (existing) return existing;
 
 		const info = this.pages.get(pageNumber);
 		if (!info) throw new Error(`No placeholder for page ${pageNumber}`);
 
-		const page: PDFPageProxy = await this.pdfDoc.getPage(pageNumber);
-		const viewport = page.getViewport({ scale: this.scale });
+		const viewport = info.pdfPage.getViewport({ scale: this.scale });
 
 		// Canvas layer — insert before annotation layer
-		// Use devicePixelRatio for high-resolution rendering
-		const canvas = document.createElement("canvas");
-		const dpr = window.devicePixelRatio || 1;
-		canvas.width = viewport.width * dpr;
-		canvas.height = viewport.height * dpr;
-		canvas.style.width = `${viewport.width}px`;
-		canvas.style.height = `${viewport.height}px`;
+		const canvas = await this.drawCanvas(info.pdfPage, viewport);
 		info.container.insertBefore(canvas, info.annotationLayerDiv);
-
-		const ctx = canvas.getContext("2d")!;
-		ctx.scale(dpr, dpr);
-		await page.render({ canvasContext: ctx, viewport }).promise;
 
 		// Text layer — append after annotation layer (topmost for selection)
 		const textLayerDiv = document.createElement("div");
 		textLayerDiv.className = "textLayer";
-		textLayerDiv.style.setProperty("--scale-factor", String(this.scale));
+		textLayerDiv.style.setProperty("--scale-factor", String(viewport.scale));
 		info.container.appendChild(textLayerDiv);
 
-		const textContent = await page.getTextContent();
 		const textLayer = new TextLayer({
-			textContentSource: textContent,
+			textContentSource: await info.pdfPage.getTextContent(),
 			container: textLayerDiv,
 			viewport,
 		});
 		await textLayer.render();
 
-		info.viewport = viewport;
-
-		const rendered: RenderedPage = {
-			...info, canvas, textLayerDiv, viewport,
-		};
+		const rendered: RenderedPage = { ...info, canvas, textLayerDiv, textLayer };
 		this.renderedPages.set(pageNumber, rendered);
+
+		// Zoomed while this page was rendering: bring it up to the new scale
+		if (viewport.scale !== this.scale) void this.reRenderPage(rendered);
 		return rendered;
 	}
 
@@ -163,71 +166,47 @@ export class PdfRenderer {
 	}
 
 	/**
-	 * Re-render a single page at the current scale.
-	 * Canvas is re-drawn from the PDF (vector quality), text layer rebuilt.
+	 * Resize every page to the current scale. Synchronous and cheap: rendered
+	 * canvases are CSS-stretched, and text layers are hidden, since restyling
+	 * their ~2000 spans costs ~10ms per page on every zoom step. Follow with
+	 * reRenderAllPages(), which redraws the canvases and reveals the text layers.
 	 */
-	async reRenderPage(rendered: RenderedPage): Promise<void> {
-		if (!this.pdfDoc) return;
-
-		const page = await this.pdfDoc.getPage(rendered.pageNumber);
-		const viewport = page.getViewport({ scale: this.scale });
-
-		// Update container size
-		rendered.container.style.width = `${viewport.width}px`;
-		rendered.container.style.height = `${viewport.height}px`;
-		rendered.leftCommentMargin.style.minHeight = `${viewport.height}px`;
-		rendered.rightCommentMargin.style.minHeight = `${viewport.height}px`;
-
-		// Re-render canvas with high-resolution support
-		const canvas = rendered.canvas;
-		const dpr = window.devicePixelRatio || 1;
-		canvas.width = viewport.width * dpr;
-		canvas.height = viewport.height * dpr;
-		canvas.style.width = `${viewport.width}px`;
-		canvas.style.height = `${viewport.height}px`;
-		const ctx = canvas.getContext("2d")!;
-		ctx.scale(dpr, dpr);
-		ctx.clearRect(0, 0, canvas.width, canvas.height);
-		await page.render({ canvasContext: ctx, viewport }).promise;
-
-		// Rebuild text layer
-		rendered.textLayerDiv.innerHTML = "";
-		rendered.textLayerDiv.style.setProperty("--scale-factor", String(this.scale));
-		const textContent = await page.getTextContent();
-		const textLayer = new TextLayer({
-			textContentSource: textContent,
-			container: rendered.textLayerDiv,
-			viewport: viewport,
-		});
-		await textLayer.render();
-
-		// Update viewport reference
-		rendered.viewport = viewport;
-
-		// Sync viewport to base page info
-		const info = this.pages.get(rendered.pageNumber);
-		if (info) info.viewport = viewport;
-	}
-
-	/** Re-render only currently-rendered (visible) pages at the new scale. */
-	async reRenderAllPages(): Promise<void> {
+	resizePages(): void {
+		for (const info of this.pages.values()) this.applySize(info);
 		for (const rendered of this.renderedPages.values()) {
-			await this.reRenderPage(rendered);
+			rendered.textLayerDiv.style.display = "none";
 		}
 	}
 
-	/** Update placeholder dimensions for non-rendered pages after a scale change. */
-	async updateAllPlaceholders(): Promise<void> {
-		if (!this.pdfDoc) return;
-		for (const [pageNumber, info] of this.pages) {
-			if (this.renderedPages.has(pageNumber)) continue;
-			const page = await this.pdfDoc.getPage(pageNumber);
-			const viewport = page.getViewport({ scale: this.scale });
-			info.container.style.width = `${viewport.width}px`;
-			info.container.style.height = `${viewport.height}px`;
-			info.leftCommentMargin.style.minHeight = `${viewport.height}px`;
-			info.rightCommentMargin.style.minHeight = `${viewport.height}px`;
-			info.viewport = viewport;
+	/**
+	 * Redraw a rendered page sharply at the current scale. The new canvas is
+	 * drawn off-screen and swapped in, so the stretched one stays visible meanwhile.
+	 */
+	async reRenderPage(rendered: RenderedPage): Promise<void> {
+		const viewport = rendered.pdfPage.getViewport({ scale: this.scale });
+		rendered.textLayerDiv.style.setProperty("--scale-factor", String(viewport.scale));
+		rendered.textLayer.update({ viewport });
+		rendered.textLayerDiv.style.display = "";
+
+		const canvas = await this.drawCanvas(rendered.pdfPage, viewport);
+
+		// Stale: zoomed again, or the page was unrendered while drawing
+		if (viewport.scale !== this.scale || this.renderedPages.get(rendered.pageNumber) !== rendered) {
+			canvas.width = 0;
+			canvas.height = 0;
+			return;
+		}
+
+		rendered.canvas.replaceWith(canvas);
+		rendered.canvas.width = 0;
+		rendered.canvas.height = 0;
+		rendered.canvas = canvas;
+	}
+
+	/** Re-render only currently-rendered (visible) pages at the current scale. */
+	async reRenderAllPages(): Promise<void> {
+		for (const rendered of this.renderedPages.values()) {
+			await this.reRenderPage(rendered);
 		}
 	}
 
@@ -252,10 +231,6 @@ export class PdfRenderer {
 
 	getPageInfo(pageNumber: number): PageInfo | undefined {
 		return this.pages.get(pageNumber);
-	}
-
-	getAllRenderedPages(): RenderedPage[] {
-		return Array.from(this.renderedPages.values());
 	}
 
 	getAllPageInfos(): PageInfo[] {

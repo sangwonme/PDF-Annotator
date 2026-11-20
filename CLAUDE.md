@@ -35,5 +35,5 @@ npm run build  # production build
 - `src/AnnotationStore.ts` — JSON 사이드카 파일 저장/로드
 - `src/HighlightManager.ts` — 텍스트 선택 및 하이라이트 로직
 - `src/ColorPicker.ts` — 색상 선택 UI
-- `src/NoteModal.ts` — 노트 입력 모달
+- `src/FindBar.ts` — Ctrl+F 문서 검색
 - `src/types.ts` — 타입 정의

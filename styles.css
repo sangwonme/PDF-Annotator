@@ -16,6 +16,47 @@
 	display: flex;
 	align-items: center;
 	justify-content: center;
+	gap: 16px;
+	/* anchors the find bar */
+	position: relative;
+}
+
+/* Find bar (Ctrl+F): floats below the header's right end */
+.pdf-annotator-find-bar {
+	position: absolute;
+	top: calc(100% + 6px);
+	right: 16px;
+	z-index: 10;
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	padding: 4px 6px;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	box-shadow: var(--shadow-s);
+}
+
+.pdf-annotator-find-bar input {
+	width: 200px;
+}
+
+.pdf-annotator-find-count {
+	min-width: 64px;
+	padding: 0 4px;
+	text-align: center;
+	font-size: 12px;
+	color: var(--text-muted);
+	font-variant-numeric: tabular-nums;
+}
+
+/* Matches are painted on the (transparent) text layer, over the canvas */
+::highlight(pdf-annotator-find) {
+	background-color: rgba(255, 196, 0, 0.4);
+}
+
+::highlight(pdf-annotator-find-current) {
+	background-color: rgba(255, 110, 0, 0.55);
 }
 
 .pdf-annotator-page-indicator {
@@ -30,7 +71,8 @@
 	overflow-y: auto;
 	display: flex;
 	flex-direction: column;
-	align-items: center;
+	/* safe: when margins + page are wider than the pane, start-align so the left margin stays scrollable */
+	align-items: safe center;
 	padding: 20px 0;
 	gap: 10px;
 	background-color: var(--background-secondary);
@@ -61,6 +103,9 @@
 
 .pdf-annotator-page canvas {
 	display: block;
+	/* Fill the page box: during zoom the old bitmap stretches until it is redrawn */
+	width: 100%;
+	height: 100%;
 }
 
 /* Comment margins */
@@ -167,7 +212,7 @@
 	border: 1px solid var(--background-modifier-border);
 	border-radius: 6px;
 	overflow: hidden;
-	cursor: default;
+	cursor: pointer;
 	transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
@@ -194,22 +239,92 @@
 	color: var(--text-normal);
 	white-space: pre-wrap;
 	word-break: break-word;
-	padding-right: 22px;
+	/* 2-line preview keeps dense margins compact and cards next to their highlights */
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	overflow: hidden;
 }
 
-/* Action buttons row */
-.pdf-annotator-comment-actions {
-	position: absolute;
-	top: 4px;
-	right: 4px;
+/* Clicked open: full text (cards below are pushed down by the layout) */
+.pdf-annotator-comment-card.expanded .pdf-annotator-comment-text {
+	-webkit-line-clamp: unset;
+}
+
+/* A resized textarea may outgrow the layout; keep it above its neighbours */
+.pdf-annotator-comment-card.editing {
+	z-index: 1;
+}
+
+/* Star toggle: right column of the card */
+.pdf-annotator-comment-star {
+	flex-shrink: 0;
+	align-self: flex-start;
+	width: 24px;
+	height: 24px;
+	margin: 4px 4px 0 0;
+	padding: 0;
 	display: flex;
-	gap: 2px;
-	opacity: 0;
-	transition: opacity 0.15s ease;
+	align-items: center;
+	justify-content: center;
+	background: none;
+	border: none;
+	box-shadow: none;
+	color: var(--text-faint);
+	cursor: pointer;
 }
 
-.pdf-annotator-comment-card:hover .pdf-annotator-comment-actions {
+.pdf-annotator-comment-star:hover {
+	color: var(--text-muted);
+	background: var(--background-modifier-hover);
+}
+
+.pdf-annotator-comment-card.starred .pdf-annotator-comment-star,
+.pdf-annotator-filter-star.is-active {
+	color: #F5B400;
+}
+
+.pdf-annotator-comment-card.starred .pdf-annotator-comment-star svg,
+.pdf-annotator-filter-star.is-active svg {
+	fill: currentColor;
+}
+
+/* Header filters (next to the page indicator) */
+.pdf-annotator-filters {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.pdf-annotator-filter-color {
+	width: 14px;
+	height: 14px;
+	border-radius: 50%;
+	border: 2px solid transparent;
+	opacity: 0.4;
+	cursor: pointer;
+	transition: opacity 0.1s ease;
+}
+
+.pdf-annotator-filter-color:hover {
+	opacity: 0.75;
+}
+
+.pdf-annotator-filter-color.is-active {
 	opacity: 1;
+	border-color: var(--text-normal);
+}
+
+/* Action buttons: own row below the text, only on an expanded card */
+.pdf-annotator-comment-actions {
+	display: none;
+	justify-content: flex-end;
+	gap: 2px;
+	margin-top: 4px;
+}
+
+.pdf-annotator-comment-card.expanded .pdf-annotator-comment-actions {
+	display: flex;
 }
 
 .pdf-annotator-comment-action-btn {
@@ -331,36 +446,4 @@
 	color: var(--text-normal);
 	transform: scale(1.1);
 	border-color: transparent;
-}
-
-/* Note modal */
-.pdf-annotator-note-modal h3 {
-	margin-top: 0;
-	margin-bottom: 12px;
-}
-
-.pdf-annotator-note-textarea {
-	width: 100%;
-	min-height: 120px;
-	resize: vertical;
-	padding: 8px;
-	border: 1px solid var(--background-modifier-border);
-	border-radius: 4px;
-	background: var(--background-primary);
-	color: var(--text-normal);
-	font-family: inherit;
-	font-size: 14px;
-	line-height: 1.5;
-}
-
-.pdf-annotator-note-textarea:focus {
-	outline: none;
-	border-color: var(--interactive-accent);
-}
-
-.pdf-annotator-note-buttons {
-	display: flex;
-	justify-content: flex-end;
-	gap: 8px;
-	margin-top: 12px;
 }

@@ -9,15 +9,12 @@ import type { PdfRenderer } from "./PdfRenderer";
 export interface Command {
 	execute(): void;
 	undo(): void;
-	description: string;
 }
 
 /**
  * Command for creating a highlight
  */
 export class CreateHighlightCommand implements Command {
-	description = "Create highlight";
-
 	constructor(
 		private annotation: Annotation,
 		private store: AnnotationStore,
@@ -27,7 +24,7 @@ export class CreateHighlightCommand implements Command {
 
 	execute(): void {
 		this.store.addAnnotation(this.annotation);
-		const page = this.renderer.getRenderedPage(this.annotation.pageNumber);
+		const page = this.renderer.getPageInfo(this.annotation.pageNumber);
 		if (page) {
 			this.layer.renderHighlight(page, this.annotation);
 		}
@@ -45,8 +42,6 @@ export class CreateHighlightCommand implements Command {
  * Command for deleting a highlight
  */
 export class DeleteHighlightCommand implements Command {
-	description = "Delete highlight";
-
 	constructor(
 		private annotation: Annotation,
 		private store: AnnotationStore,
@@ -62,7 +57,7 @@ export class DeleteHighlightCommand implements Command {
 
 	undo(): void {
 		this.store.addAnnotation(this.annotation);
-		const page = this.renderer.getRenderedPage(this.annotation.pageNumber);
+		const page = this.renderer.getPageInfo(this.annotation.pageNumber);
 		if (page) {
 			this.layer.renderHighlight(page, this.annotation);
 		}
@@ -74,8 +69,6 @@ export class DeleteHighlightCommand implements Command {
  * Command for editing a comment
  */
 export class EditCommentCommand implements Command {
-	description = "Edit comment";
-
 	constructor(
 		private annotationId: string,
 		private oldComment: string,
@@ -101,8 +94,6 @@ export class EditCommentCommand implements Command {
  * Command for clearing a comment (keeping highlight)
  */
 export class ClearCommentCommand implements Command {
-	description = "Clear comment";
-
 	constructor(
 		private annotationId: string,
 		private oldComment: string,
@@ -127,8 +118,6 @@ export class ClearCommentCommand implements Command {
  * Command for changing highlight color
  */
 export class ChangeColorCommand implements Command {
-	description = "Change color";
-
 	constructor(
 		private annotationId: string,
 		private oldColor: string,
@@ -218,19 +207,4 @@ export class UndoManager {
 		this.redoStack = [];
 	}
 
-	/**
-	 * Get the description of the next undo action
-	 */
-	getUndoDescription(): string | null {
-		const command = this.undoStack[this.undoStack.length - 1];
-		return command ? command.description : null;
-	}
-
-	/**
-	 * Get the description of the next redo action
-	 */
-	getRedoDescription(): string | null {
-		const command = this.redoStack[this.redoStack.length - 1];
-		return command ? command.description : null;
-	}
 }
