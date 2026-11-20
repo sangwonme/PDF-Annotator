@@ -6,7 +6,7 @@ export default class PdfAnnotatorPlugin extends Plugin {
 	async onload(): Promise<void> {
 		this.registerView(
 			VIEW_TYPE_PDF_ANNOTATOR,
-			(leaf) => new PdfAnnotatorView(leaf, this)
+			(leaf) => new PdfAnnotatorView(leaf)
 		);
 
 		// File menu: "Open with PDF Annotator"
@@ -57,7 +57,12 @@ export default class PdfAnnotatorPlugin extends Plugin {
 		// Intercept Ctrl+Z/Ctrl+Shift+Z at document level (capturing phase)
 		// This runs BEFORE Obsidian's command system, allowing conditional handling
 		this.registerDomEvent(document, "keydown", (evt: KeyboardEvent) => {
-			if ((evt.ctrlKey || evt.metaKey) && evt.key === "z" && !evt.repeat) {
+			// key is "Z" when Shift is held
+			if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === "z" && !evt.repeat) {
+				// Leave text fields (comment textarea, Obsidian search/modals) to their native undo
+				const target = evt.target as HTMLElement;
+				if (target.isContentEditable || target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
+
 				const activeView = this.app.workspace.getActiveViewOfType(PdfAnnotatorView);
 
 				if (evt.shiftKey) {

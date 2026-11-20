@@ -74,8 +74,4 @@ export class AnnotationStore {
 	getAnnotationsForPage(pageNumber: number): Annotation[] {
 		return this.annotations.filter(a => a.pageNumber === pageNumber);
 	}
-
-	getAllAnnotations(): Annotation[] {
-		return [...this.annotations];
-	}
 }

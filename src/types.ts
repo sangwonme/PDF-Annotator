@@ -6,6 +6,7 @@ export const HIGHLIGHT_COLORS: Record<string, string> = {
 	blue: "#42A5F5",
 	pink: "#EC407A",
 	orange: "#FFA726",
+	purple: "#BA68C8", // a shade lighter than #AB47BC
 };
 
 export const DICTIONARY_COLOR = "#D2B48C";
@@ -47,6 +48,7 @@ export interface Annotation {
 	pageNumber: number;
 	selectors: AnnotationSelector[];
 	comment: string;
+	starred?: boolean;
 }
 
 export interface AnnotationFileData {

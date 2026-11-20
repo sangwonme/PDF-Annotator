@@ -1,21 +1,23 @@
-import { FileView, TFile, WorkspaceLeaf, Notice } from "obsidian";
-import { VIEW_TYPE_PDF_ANNOTATOR } from "./types";
-import type { Annotation } from "./types";
-import { PdfRenderer, type PageInfo } from "./PdfRenderer";
+import { FileView, TFile, WorkspaceLeaf, Notice, Scope, debounce, setIcon } from "obsidian";
+import { DICTIONARY_COLOR, HIGHLIGHT_COLORS, VIEW_TYPE_PDF_ANNOTATOR } from "./types";
+import { PdfRenderer } from "./PdfRenderer";
 import { AnnotationStore } from "./AnnotationStore";
 import { HighlightManager } from "./HighlightManager";
 import { AnnotationLayer } from "./AnnotationLayer";
-import type PdfAnnotatorPlugin from "./main";
+import { FindBar } from "./FindBar";
 
 export class PdfAnnotatorView extends FileView {
 	private renderer: PdfRenderer;
 	private store: AnnotationStore;
 	private highlightManager: HighlightManager;
+	private findBar: FindBar | null = null;
 	private annotationLayer: AnnotationLayer;
 	private scrollContainer: HTMLDivElement | null = null;
-	private plugin: PdfAnnotatorPlugin;
 	private zoomAbortController: AbortController | null = null;
-	private isZooming = false;
+	private lastZoomAt = 0;
+	private zoomNotice: Notice | null = null;
+	// Redraw canvases sharply once zooming pauses (until then they are CSS-stretched)
+	private sharpenPages = debounce(() => void this.renderer.reRenderAllPages(), 200, true);
 	private intersectionObserver: IntersectionObserver | null = null;
 	private pageTrackingObserver: IntersectionObserver | null = null;
 	private renderingPages: Set<number> = new Set();
@@ -23,17 +25,15 @@ export class PdfAnnotatorView extends FileView {
 	private currentPage = 1;
 	private totalPages = 0;
 
-	constructor(leaf: WorkspaceLeaf, plugin: PdfAnnotatorPlugin) {
+	constructor(leaf: WorkspaceLeaf) {
 		super(leaf);
-		this.plugin = plugin;
 		this.renderer = new PdfRenderer();
 		this.store = new AnnotationStore(this.app);
 		this.annotationLayer = new AnnotationLayer();
 		this.highlightManager = new HighlightManager(
 			this.renderer,
 			this.store,
-			this.annotationLayer,
-			this.app
+			this.annotationLayer
 		);
 	}
 
@@ -60,11 +60,20 @@ export class PdfAnnotatorView extends FileView {
 
 		// Header with page indicator
 		const header = container.createDiv({ cls: "pdf-annotator-header" });
+		this.setupFilters(header);
 		this.setupPageIndicator(header);
 
 		// Scroll container for PDF content
 		this.scrollContainer = container.createDiv({ cls: "pdf-annotator-scroll" });
 		this.setupZoomHandlers();
+
+		this.findBar = new FindBar(header, this.renderer, this.scrollContainer, () => this.currentPage);
+		// Ctrl/Cmd+F only while this view is focused; elsewhere Obsidian's own Ctrl+F is untouched
+		this.scope = new Scope(this.app.scope);
+		this.scope.register(["Mod"], "f", () => {
+			this.findBar?.open();
+			return false;
+		});
 	}
 
 	async onClose(): Promise<void> {
@@ -111,6 +120,34 @@ export class PdfAnnotatorView extends FileView {
 		}, { signal });
 	}
 
+	/** Star + color filter toggles; active ones are OR-ed. State survives switching files. */
+	private setupFilters(header: HTMLElement): void {
+		const filters = header.createDiv({ cls: "pdf-annotator-filters" });
+		let starred = false;
+		const colors = new Set<string>();
+		const apply = () => this.annotationLayer.setFilter(starred, colors);
+
+		const starBtn = filters.createDiv({ cls: "clickable-icon pdf-annotator-filter-star", attr: { "aria-label": "Starred" } });
+		setIcon(starBtn, "star");
+		starBtn.addEventListener("click", () => {
+			starred = !starred;
+			starBtn.toggleClass("is-active", starred);
+			apply();
+		});
+
+		const palette = { ...HIGHLIGHT_COLORS, dictionary: DICTIONARY_COLOR };
+		for (const [name, hex] of Object.entries(palette)) {
+			const dot = filters.createDiv({ cls: "pdf-annotator-filter-color", attr: { "aria-label": name } });
+			dot.style.backgroundColor = hex;
+			dot.addEventListener("click", () => {
+				const on = !colors.delete(hex);
+				if (on) colors.add(hex);
+				dot.toggleClass("is-active", on);
+				apply();
+			});
+		}
+	}
+
 	private setupPageIndicator(header: HTMLElement): void {
 		this.pageIndicator = header.createDiv({ cls: "pdf-annotator-page-indicator" });
 		this.pageIndicator.setText("0 / 0");
@@ -121,46 +158,41 @@ export class PdfAnnotatorView extends FileView {
 		this.pageIndicator.setText(`${this.currentPage} / ${this.totalPages}`);
 	}
 
-	private async zoom(direction: "in" | "out" | "reset"): Promise<void> {
-		if (this.isZooming) return;
-		this.isZooming = true;
+	private zoom(direction: "in" | "out" | "reset"): void {
+		// Trackpad pinch fires a burst of ctrl+wheel events; take at most one step per 100ms
+		const now = performance.now();
+		if (now - this.lastZoomAt < 100) return;
+		this.lastZoomAt = now;
 
-		try {
-			const scrollEl = this.scrollContainer!;
-			// Remember scroll position as a ratio
-			const scrollRatio = scrollEl.scrollHeight > 0
-				? scrollEl.scrollTop / scrollEl.scrollHeight
-				: 0;
+		const scrollEl = this.scrollContainer!;
+		// Remember scroll position as a ratio
+		const scrollRatio = scrollEl.scrollHeight > 0
+			? scrollEl.scrollTop / scrollEl.scrollHeight
+			: 0;
 
-			if (direction === "reset") {
-				this.renderer.setScale(1.5);
-			} else if (direction === "in") {
-				this.renderer.zoomIn();
-			} else {
-				this.renderer.zoomOut();
-			}
-
-			const scale = this.renderer.getScale();
-			new Notice(`Zoom: ${Math.round(scale * 100 / 1.5)}%`);
-
-			// Update sizes for all pages: re-render visible, resize placeholders
-			await this.renderer.updateAllPlaceholders();
-			await this.renderer.reRenderAllPages();
-
-			// Re-render annotations only for rendered pages (visible)
-			this.annotationLayer.clear();
-			for (const rendered of this.renderer.getAllRenderedPages()) {
-				const pageAnnotations = this.store.getAnnotationsForPage(rendered.pageNumber);
-				for (const annotation of pageAnnotations) {
-					this.annotationLayer.renderHighlight(rendered, annotation);
-				}
-			}
-
-			// Restore scroll position
-			scrollEl.scrollTop = scrollRatio * scrollEl.scrollHeight;
-		} finally {
-			this.isZooming = false;
+		if (direction === "reset") {
+			this.renderer.setScale(1.5);
+		} else if (direction === "in") {
+			this.renderer.zoomIn();
+		} else {
+			this.renderer.zoomOut();
 		}
+
+		const scale = this.renderer.getScale();
+		// One toast at a time, not one per step
+		this.zoomNotice?.hide();
+		this.zoomNotice = new Notice(`Zoom: ${Math.round(scale * 100 / 1.5)}%`);
+
+		// Instant: highlights are in % of the page, canvases stretch until sharpened.
+		// Only comment cards (fixed px size) need re-placing.
+		this.renderer.resizePages();
+		for (const pageInfo of this.renderer.getAllPageInfos()) {
+			this.annotationLayer.layoutPage(pageInfo);
+		}
+
+		// Restore scroll position
+		scrollEl.scrollTop = scrollRatio * scrollEl.scrollHeight;
+		this.sharpenPages();
 	}
 
 	async onLoadFile(file: TFile): Promise<void> {
@@ -207,7 +239,7 @@ export class PdfAnnotatorView extends FileView {
 			this.setupIntersectionObserver();
 
 			// Set up highlight manager for text selection
-			this.highlightManager.setup(this.scrollContainer, file);
+			this.highlightManager.setup(this.scrollContainer);
 		} catch (e) {
 			loading.setText(`Failed to load PDF: ${e}`);
 		}
@@ -233,7 +265,9 @@ export class PdfAnnotatorView extends FileView {
 
 					if (entry.isIntersecting) {
 						this.lazyRenderPage(pageNumber);
-						this.renderPageAnnotations(pageNumber);
+						// Cards can't be measured while hidden (e.g. opened in a background tab)
+						const pageInfo = this.renderer.getPageInfo(pageNumber);
+						if (pageInfo) this.annotationLayer.layoutPage(pageInfo);
 					} else {
 						this.lazyUnrenderPage(pageNumber);
 					}
@@ -316,6 +350,7 @@ export class PdfAnnotatorView extends FileView {
 		this.renderingPages.add(pageNumber);
 		try {
 			await this.renderer.renderPageContent(pageNumber);
+			this.findBar?.paintPage(pageNumber);
 		} catch (e) {
 			console.error(`PDF Annotator: failed to render page ${pageNumber}:`, e);
 		} finally {
@@ -327,29 +362,15 @@ export class PdfAnnotatorView extends FileView {
 		this.renderer.unrenderPageContent(pageNumber);
 	}
 
-	/**
-	 * Render annotations for a page if they haven't been rendered yet.
-	 * Called when a page enters the viewport (e.g., after zoom or scroll).
-	 */
-	private renderPageAnnotations(pageNumber: number): void {
-		const pageInfo = this.renderer.getPageInfo(pageNumber);
-		if (!pageInfo) return;
-
-		const pageAnnotations = this.store.getAnnotationsForPage(pageNumber);
-		for (const annotation of pageAnnotations) {
-			// Render only if not already rendered (avoid duplicates)
-			if (!this.annotationLayer.hasAnnotation(annotation.id)) {
-				this.annotationLayer.renderHighlight(pageInfo, annotation);
-			}
-		}
-	}
-
 	async onUnloadFile(file: TFile): Promise<void> {
 		this.intersectionObserver?.disconnect();
 		this.intersectionObserver = null;
 		this.pageTrackingObserver?.disconnect();
 		this.pageTrackingObserver = null;
+		this.sharpenPages.cancel();
+		this.findBar?.reset();
 		this.highlightManager.destroy();
+		this.annotationLayer.clear();
 		this.renderer.destroy();
 		if (this.scrollContainer) {
 			this.scrollContainer.empty();

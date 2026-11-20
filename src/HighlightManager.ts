@@ -1,4 +1,4 @@
-import { App, Menu, Notice, TFile } from "obsidian";
+import { Menu, Notice } from "obsidian";
 import type { PdfRenderer, RenderedPage } from "./PdfRenderer";
 import type { AnnotationStore } from "./AnnotationStore";
 import type { AnnotationLayer } from "./AnnotationLayer";
@@ -23,11 +23,8 @@ export class HighlightManager {
 	private renderer: PdfRenderer;
 	private store: AnnotationStore;
 	private annotationLayer: AnnotationLayer;
-	private app: App;
 	private colorPicker: ColorPicker;
 	private dictionaryService: DictionaryService;
-	private scrollContainer: HTMLElement | null = null;
-	private file: TFile | null = null;
 	private abortController: AbortController | null = null;
 	private mouseMoveRAF: number | null = null;
 	private undoManager: UndoManager;
@@ -35,21 +32,17 @@ export class HighlightManager {
 	constructor(
 		renderer: PdfRenderer,
 		store: AnnotationStore,
-		annotationLayer: AnnotationLayer,
-		app: App
+		annotationLayer: AnnotationLayer
 	) {
 		this.renderer = renderer;
 		this.store = store;
 		this.annotationLayer = annotationLayer;
-		this.app = app;
 		this.colorPicker = new ColorPicker();
 		this.dictionaryService = new DictionaryService();
 		this.undoManager = new UndoManager();
 	}
 
-	setup(scrollContainer: HTMLElement, file: TFile): void {
-		this.scrollContainer = scrollContainer;
-		this.file = file;
+	setup(scrollContainer: HTMLElement): void {
 		this.abortController = new AbortController();
 		const signal = this.abortController.signal;
 
@@ -96,9 +89,11 @@ export class HighlightManager {
 			this.undoManager.execute(command);
 		});
 
+		this.annotationLayer.setStarToggleCallback((annotationId) => this.toggleStar(annotationId));
+
 		// Text selection → color picker
-		scrollContainer.addEventListener("mouseup", (e) => {
-			setTimeout(() => this.handleTextSelection(e), 10);
+		scrollContainer.addEventListener("mouseup", () => {
+			setTimeout(() => this.handleTextSelection(), 10);
 		}, { signal });
 
 		// Highlight click → context menu (use elementsFromPoint since highlights are below text layer)
@@ -177,7 +172,7 @@ export class HighlightManager {
 		return null;
 	}
 
-	private handleTextSelection(e: MouseEvent): void {
+	private handleTextSelection(): void {
 		const selection = window.getSelection();
 		if (!selection || selection.isCollapsed || !selection.toString().trim()) return;
 
@@ -284,7 +279,7 @@ export class HighlightManager {
 	}
 
 	private buildSelectors(selection: Selection, range: Range, renderedPage: RenderedPage): AnnotationSelector[] {
-		const { textLayerDiv, viewport, container } = renderedPage;
+		const { textLayerDiv, container } = renderedPage;
 		const exact = selection.toString();
 
 		// TextQuoteSelector
@@ -375,6 +370,12 @@ export class HighlightManager {
 				.onClick(() => this.editNote(annotationId));
 		});
 
+		menu.addItem((item) => {
+			item.setTitle(annotation.starred ? "Unstar" : "Star")
+				.setIcon("star")
+				.onClick(() => this.toggleStar(annotationId));
+		});
+
 		// Color submenu
 		for (const [name, hex] of Object.entries(HIGHLIGHT_COLORS)) {
 			menu.addItem((item) => {
@@ -411,6 +412,16 @@ export class HighlightManager {
 		menu.showAtMouseEvent(e);
 	}
 
+	private toggleStar(annotationId: string): void {
+		const annotation = this.store.getAnnotation(annotationId);
+		if (!annotation) return;
+
+		const starred = !annotation.starred;
+		this.store.updateAnnotation(annotationId, { starred });
+		this.annotationLayer.setStarred(annotationId, starred);
+		this.store.saveAnnotations();
+	}
+
 	private editNote(annotationId: string): void {
 		const annotation = this.store.getAnnotation(annotationId);
 		if (!annotation) return;
@@ -433,7 +444,7 @@ export class HighlightManager {
 			this.mouseMoveRAF = null;
 		}
 		this.colorPicker.hide();
-		this.scrollContainer = null;
-		this.file = null;
+		// History belongs to the unloaded file; undoing it would write into the next one
+		this.undoManager.clear();
 	}
 }
