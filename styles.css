@@ -66,6 +66,67 @@
 	font-variant-numeric: tabular-nums;
 }
 
+/* Below the header: ToC sidebar + scrolling pages */
+.pdf-annotator-body {
+	flex: 1;
+	min-height: 0;
+	display: flex;
+}
+
+.pdf-annotator-toc {
+	width: 240px;
+	flex-shrink: 0;
+	overflow-y: auto;
+	padding: 8px 4px;
+	background: var(--background-primary);
+	border-right: 1px solid var(--background-modifier-border);
+	font-size: 13px;
+	line-height: 1.35;
+	user-select: none;
+}
+
+.pdf-annotator-toc-item {
+	display: flex;
+	align-items: flex-start;
+	gap: 2px;
+	padding: 4px 4px 4px 8px;
+	border-radius: 4px;
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.pdf-annotator-toc-item:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.pdf-annotator-toc-title {
+	flex: 1;
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+/* Remove button on user-added headings, shown on hover */
+.pdf-annotator-toc-remove {
+	flex-shrink: 0;
+	padding: 0 2px;
+	visibility: hidden;
+}
+
+.pdf-annotator-toc-item:hover .pdf-annotator-toc-remove {
+	visibility: visible;
+}
+
+/* Header toggle sits at the left end, above the sidebar */
+.pdf-annotator-toc-toggle {
+	position: absolute;
+	left: 8px;
+}
+
+.pdf-annotator-toc-toggle.is-active {
+	color: var(--interactive-accent);
+}
+
 .pdf-annotator-scroll {
 	flex: 1;
 	overflow-y: auto;

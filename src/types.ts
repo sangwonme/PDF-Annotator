@@ -51,7 +51,16 @@ export interface Annotation {
 	starred?: boolean;
 }
 
+/** Table-of-contents heading; `top` is its position as a fraction of the page height */
+export interface TocHeading {
+	title: string;
+	page: number;
+	top: number;
+}
+
 export interface AnnotationFileData {
 	version: number;
 	annotations: Annotation[];
+	/** Headings the user added by hand (the PDF's own bookmarks are not stored) */
+	toc?: TocHeading[];
 }

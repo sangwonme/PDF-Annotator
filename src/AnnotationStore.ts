@@ -1,8 +1,9 @@
 import { App, TFile } from "obsidian";
-import type { Annotation, AnnotationFileData } from "./types";
+import type { Annotation, AnnotationFileData, TocHeading } from "./types";
 
 export class AnnotationStore {
 	private annotations: Annotation[] = [];
+	toc: TocHeading[] = [];
 	private file: TFile | null = null;
 	private app: App;
 
@@ -17,6 +18,7 @@ export class AnnotationStore {
 	async loadAnnotations(pdfFile: TFile): Promise<void> {
 		this.file = pdfFile;
 		this.annotations = [];
+		this.toc = [];
 
 		const path = this.getAnnotationPath(pdfFile);
 		const existingFile = this.app.vault.getAbstractFileByPath(path);
@@ -28,6 +30,7 @@ export class AnnotationStore {
 				if (data.version === 1 && Array.isArray(data.annotations)) {
 					this.annotations = data.annotations;
 				}
+				if (Array.isArray(data.toc)) this.toc = data.toc;
 			} catch (e) {
 				console.error("Failed to load annotations:", e);
 			}
@@ -41,6 +44,7 @@ export class AnnotationStore {
 		const data: AnnotationFileData = {
 			version: 1,
 			annotations: this.annotations,
+			toc: this.toc.length ? this.toc : undefined,
 		};
 		const content = JSON.stringify(data, null, "\t");
 

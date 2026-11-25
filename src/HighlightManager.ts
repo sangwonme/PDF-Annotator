@@ -2,7 +2,7 @@ import { Menu, Notice } from "obsidian";
 import type { PdfRenderer, RenderedPage } from "./PdfRenderer";
 import type { AnnotationStore } from "./AnnotationStore";
 import type { AnnotationLayer } from "./AnnotationLayer";
-import type { Annotation, NormalizedRect, AnnotationSelector } from "./types";
+import type { Annotation, NormalizedRect, AnnotationSelector, TocHeading } from "./types";
 import { DICTIONARY_COLOR, HIGHLIGHT_COLORS } from "./types";
 import { ColorPicker } from "./ColorPicker";
 import { DictionaryService } from "./DictionaryService";
@@ -32,7 +32,8 @@ export class HighlightManager {
 	constructor(
 		renderer: PdfRenderer,
 		store: AnnotationStore,
-		annotationLayer: AnnotationLayer
+		annotationLayer: AnnotationLayer,
+		private onAddHeading: (heading: TocHeading) => void
 	) {
 		this.renderer = renderer;
 		this.store = store;
@@ -192,7 +193,14 @@ export class HighlightManager {
 			rect.left + rect.width / 2 - 75,
 			rect.bottom + 5,
 			(color) => this.createHighlight(selection, pageNumber, color),
-			() => this.handleDictionaryLookup(selection, pageNumber)
+			() => this.handleDictionaryLookup(selection, pageNumber),
+			() => {
+				const pageRect = pageContainer.getBoundingClientRect();
+				const title = selection.toString().replace(/\s+/g, " ").trim();
+				const top = (range.getBoundingClientRect().top - pageRect.top) / pageRect.height;
+				selection.removeAllRanges();
+				this.onAddHeading({ title, page: pageNumber, top });
+			}
 		);
 	}
 

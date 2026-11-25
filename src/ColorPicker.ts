@@ -1,3 +1,4 @@
+import { setIcon } from "obsidian";
 import { HIGHLIGHT_COLORS } from "./types";
 
 export class ColorPicker {
@@ -5,7 +6,7 @@ export class ColorPicker {
 	private onSelect: ((color: string) => void) | null = null;
 	private onDictionary: (() => void) | null = null;
 
-	show(x: number, y: number, onSelect: (color: string) => void, onDictionary?: () => void): void {
+	show(x: number, y: number, onSelect: (color: string) => void, onDictionary?: () => void, onHeading?: () => void): void {
 		this.hide();
 		this.onSelect = onSelect;
 		this.onDictionary = onDictionary ?? null;
@@ -46,6 +47,19 @@ export class ColorPicker {
 				cb?.();
 			});
 			this.containerEl.appendChild(dictBtn);
+		}
+
+		if (onHeading) {
+			const headingBtn = document.createElement("button");
+			headingBtn.className = "pdf-annotator-color-btn pdf-annotator-dict-btn";
+			headingBtn.setAttribute("aria-label", "Add to table of contents");
+			setIcon(headingBtn, "list-plus");
+			headingBtn.addEventListener("click", (e) => {
+				e.stopPropagation();
+				this.hide();
+				onHeading();
+			});
+			this.containerEl.appendChild(headingBtn);
 		}
 
 		document.body.appendChild(this.containerEl);

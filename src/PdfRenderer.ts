@@ -3,6 +3,7 @@ import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 import { TextLayer } from "pdfjs-dist";
 // @ts-ignore - esbuild text loader
 import pdfjsWorkerSrc from "pdfjs-dist/build/pdf.worker.min.mjs";
+import type { TocHeading } from "./types";
 
 const workerBlob = new Blob([pdfjsWorkerSrc], { type: "application/javascript" });
 pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(workerBlob);
@@ -223,6 +224,40 @@ export class PdfRenderer {
 	setScale(scale: number): number {
 		this.scale = Math.max(this.MIN_SCALE, Math.min(this.MAX_SCALE, scale));
 		return this.scale;
+	}
+
+	/** The PDF's bookmarks, flattened in order. Page 0 marks a destination that couldn't be resolved. */
+	async getOutline(): Promise<(TocHeading & { depth: number })[]> {
+		const doc = this.pdfDoc;
+		if (!doc) return [];
+		const entries: (TocHeading & { depth: number })[] = [];
+		const walk = async (items: Awaited<ReturnType<PDFDocumentProxy["getOutline"]>>, depth: number) => {
+			for (const item of items ?? []) {
+				entries.push({ title: item.title, depth, ...await this.resolveDest(doc, item.dest) });
+				await walk(item.items, depth + 1);
+			}
+		};
+		await walk(await doc.getOutline(), 0);
+		return entries;
+	}
+
+	private async resolveDest(doc: PDFDocumentProxy, dest: string | any[] | null): Promise<{ page: number; top: number }> {
+		try {
+			const explicit = typeof dest === "string" ? await doc.getDestination(dest) : dest;
+			if (!explicit) return { page: 0, top: 0 };
+			// [pageRef, { name: mode }, ...mode args]
+			const [ref, mode, ...args] = explicit;
+			const pageIndex = typeof ref === "number" ? ref : await doc.getPageIndex(ref);
+			const y = mode?.name === "XYZ" ? args[1]
+				: mode?.name === "FitH" || mode?.name === "FitBH" ? args[0]
+				: mode?.name === "FitR" ? args[3]
+				: null;
+			const viewport = (await doc.getPage(pageIndex + 1)).getViewport({ scale: 1 });
+			const top = y == null ? 0 : viewport.convertToViewportPoint(0, y)[1] / viewport.height;
+			return { page: pageIndex + 1, top: Math.min(1, Math.max(0, top)) };
+		} catch {
+			return { page: 0, top: 0 };
+		}
 	}
 
 	getRenderedPage(pageNumber: number): RenderedPage | undefined {

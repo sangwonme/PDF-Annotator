@@ -5,12 +5,14 @@ import { AnnotationStore } from "./AnnotationStore";
 import { HighlightManager } from "./HighlightManager";
 import { AnnotationLayer } from "./AnnotationLayer";
 import { FindBar } from "./FindBar";
+import { TocSidebar } from "./TocSidebar";
 
 export class PdfAnnotatorView extends FileView {
 	private renderer: PdfRenderer;
 	private store: AnnotationStore;
 	private highlightManager: HighlightManager;
 	private findBar: FindBar | null = null;
+	private toc: TocSidebar | null = null;
 	private annotationLayer: AnnotationLayer;
 	private scrollContainer: HTMLDivElement | null = null;
 	private zoomAbortController: AbortController | null = null;
@@ -33,7 +35,8 @@ export class PdfAnnotatorView extends FileView {
 		this.highlightManager = new HighlightManager(
 			this.renderer,
 			this.store,
-			this.annotationLayer
+			this.annotationLayer,
+			(heading) => this.toc?.add(heading)
 		);
 	}
 
@@ -63,8 +66,11 @@ export class PdfAnnotatorView extends FileView {
 		this.setupFilters(header);
 		this.setupPageIndicator(header);
 
-		// Scroll container for PDF content
-		this.scrollContainer = container.createDiv({ cls: "pdf-annotator-scroll" });
+		// ToC sidebar + scroll container for PDF content
+		const body = container.createDiv({ cls: "pdf-annotator-body" });
+		this.scrollContainer = createDiv({ cls: "pdf-annotator-scroll" });
+		this.toc = new TocSidebar(header, body, this.renderer, this.store, this.scrollContainer);
+		body.appendChild(this.scrollContainer);
 		this.setupZoomHandlers();
 
 		this.findBar = new FindBar(header, this.renderer, this.scrollContainer, () => this.currentPage);
@@ -217,6 +223,7 @@ export class PdfAnnotatorView extends FileView {
 
 			// Load annotations
 			await this.store.loadAnnotations(file);
+			void this.toc?.load();
 
 			// Remove loading
 			loading.remove();
@@ -280,20 +287,21 @@ export class PdfAnnotatorView extends FileView {
 		);
 
 		// Separate observer for accurate page tracking
-		// Strategy: when ANY page changes visibility, check currentPage ± 2 to find most visible
+		// Strategy: track which pages intersect, then pick the most visible of them
+		// (also right after a ToC/find jump, which can land far from the current page)
+		const visiblePages = new Set<number>();
 		this.pageTrackingObserver = new IntersectionObserver(
 			(entries) => {
-				// Only recalculate if something actually changed
-				if (entries.length === 0) return;
+				for (const entry of entries) {
+					const pageNum = Number((entry.target as HTMLElement).dataset.pageNumber);
+					if (entry.isIntersecting) visiblePages.add(pageNum);
+					else visiblePages.delete(pageNum);
+				}
 
 				let maxRatio = 0;
 				let mostVisiblePage = this.currentPage;
 
-				// Check pages around current page (± 2 range)
-				const startPage = Math.max(1, this.currentPage - 2);
-				const endPage = Math.min(this.totalPages, this.currentPage + 2);
-
-				for (let pageNum = startPage; pageNum <= endPage; pageNum++) {
+				for (const pageNum of visiblePages) {
 					const pageInfo = this.renderer.getPageInfo(pageNum);
 					if (!pageInfo) continue;
 
@@ -369,6 +377,7 @@ export class PdfAnnotatorView extends FileView {
 		this.pageTrackingObserver = null;
 		this.sharpenPages.cancel();
 		this.findBar?.reset();
+		this.toc?.reset();
 		this.highlightManager.destroy();
 		this.annotationLayer.clear();
 		this.renderer.destroy();
