@@ -2,16 +2,20 @@
 
 ## Branch Strategy
 
-- **`dev`**: 개발 브랜치. 모든 기능 개발과 버그 수정은 여기서 진행. `main.js` 빌드 결과물은 `.gitignore`에 포함되어 추적하지 않음.
+- **`dev`**: 개발 브랜치. 모든 기능 개발, 버그 수정, 버전 bump(`manifest.json`, `package.json`)는 여기서 진행. `main.js` 빌드 결과물은 `.gitignore`에 포함되어 추적하지 않음.
 - **`main`**: 릴리즈 브랜치. Obsidian 플러그인으로 바로 설치 가능한 상태를 유지. `main.js`, `manifest.json`, `styles.css`, `versions.json`이 모두 포함됨.
+
+**충돌 방지 규칙** — 이것만 지키면 `dev` → `main` merge는 항상 충돌 없이 끝난다:
+- `main`에서는 릴리즈 전용 파일(`main.js`, `versions.json`)만 커밋한다. `manifest.json`(버전 포함)과 소스는 `dev`에서만 고친다.
+- `main`을 `dev`로 merge하지 않는다 (릴리즈 전용 파일이 `dev`로 들어온다).
 
 ## Release Workflow
 
-1. `dev`에서 개발 완료
-2. `dev` -> `main`으로 merge
-3. `main`에서 `npm run build` 실행하여 `main.js` 생성
-4. 빌드 결과물(`main.js`) 커밋
-5. `versions.json` 업데이트 (새 버전 -> minAppVersion 매핑 추가)
+1. `dev`에서 개발 완료 + `manifest.json`·`package.json` 버전 bump
+2. `main`에서 `git merge dev` (위 규칙을 지켰다면 충돌 없음)
+3. `npm run build` 후 `.obsidian/plugins/pdf-annotator/main.js`를 프로젝트 루트로 복사
+4. `versions.json` 업데이트 (새 버전 -> minAppVersion 매핑 추가)
+5. `main.js`, `versions.json`만 커밋
 6. 태그 생성: `git tag vX.Y.Z`
 7. push: `git push origin main --tags`
 8. GitHub Release 생성 후 `main.js`, `manifest.json`, `styles.css` 에셋 첨부
